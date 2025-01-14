@@ -7,14 +7,9 @@ eval "$(sheldon source)"
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
 # Keybindings
-zsh_end_time=$(date +%s%N)
 bindkey '^@' autosuggest-accept
 bindkey '^r' fzf-history-selection
 
-alias update='sudo apt update && sudo apt upgrade && brew update && brew upgrade'
-alias ..='cd ..'
-alias ll='ls -alF'
-alias la='ls -a'
 # Aliases
 alias update='sudo apt update && sudo apt upgrade && brew update && brew upgrade'
 alias ..='cd ..'
@@ -28,6 +23,9 @@ alias gp='git push'
 alias gpl='git pull'
 alias gl='git log --oneline --graph --all'
 alias act='source .venv/bin/activate'
+alias deact='deactivate'
+alias nv='nvim'
+alias G='| grep'
 
 # Completion Settings
 autoload -Uz compinit
