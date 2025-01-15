@@ -46,4 +46,4 @@ ln -sf ~/dotfiles/.config/sheldon ~/.config
 ln -sf ~/dotfiles/.config/fastfetch ~/.config
 
 # Setup complete
-echo "Setup completed successfully.
+echo "Setup completed successfully."
