@@ -20,6 +20,6 @@ chmod +x setup.sh
 
 Core tools that will be installed:
 - starship (shell prompt)
-- neovim (editor)
+- neovim (editor) + win32yank (clipboard support)
 - fzf, ripgrep (search tools)
 - sheldon, fastfetch, uv
