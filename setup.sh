@@ -10,7 +10,7 @@ sudo apt install zsh -y
 chsh -s /usr/bin/zsh
 
 # Install necessary development tools and Homebrew
-sudo apt install build-essential procps curl file git -y
+sudo apt install build-essential procps curl file git unzip -y
 yes | /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
@@ -19,6 +19,13 @@ brew update && brew upgrade
 
 # Install essential tools via Homebrew
 brew install starship sheldon fzf ripgrep fastfetch neovim uv
+
+# Install win32yank
+curl -sL https://github.com/equalsraf/win32yank/releases/download/v0.1.1/win32yank-x64.zip -o win32yank.zip
+unzip -p win32yank.zip win32yank.exe > /tmp/win32yank.exe
+sudo mv /tmp/win32yank.exe /usr/local/bin/
+sudo chmod +x /usr/local/bin/win32yank.exe
+rm win32yank.zip
 
 # Configure Git
 git config --global user.name "muray0196"
