@@ -25,7 +25,6 @@ alias gl='git log --oneline --graph --all'
 alias act='source .venv/bin/activate'
 alias deact='deactivate'
 alias nv='nvim'
-alias G='| grep'
 
 # Completion Settings
 autoload -Uz compinit
