@@ -11,7 +11,7 @@ bindkey '^@' autosuggest-accept
 bindkey '^r' fzf-history-selection
 
 # Aliases
-alias update='sudo apt update && sudo apt upgrade && brew update && brew upgrade'
+alias update='sudo apt update && sudo apt upgrade -y && brew update && brew upgrade'
 alias ..='cd ..'
 alias ll='ls -alF'
 alias la='ls -a'

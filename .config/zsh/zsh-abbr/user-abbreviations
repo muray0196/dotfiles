@@ -1,4 +1,4 @@
-abbr "update"="sudo apt update && sudo apt upgrade && brew update && brew upgrade"
+abbr "update"="sudo apt update && sudo apt upgrade -y && brew update && brew upgrade"
 abbr ".."="cd .."
 abbr "ll"="ls -alF"
 abbr "la"="ls -a"
