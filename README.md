@@ -1,3 +1,3 @@
 # Dotfiles
 
-Linux開発環境の最小構成
+WSL2開発環境の最小構成
