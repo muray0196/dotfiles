@@ -1,4 +1,4 @@
-zsh_start_time=$(date +%s%N)
+## zsh_start_time=$(date +%s%N)
 
 # Environment Setup
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
@@ -25,6 +25,7 @@ alias gl='git log --oneline --graph --all'
 alias act='source .venv/bin/activate'
 alias deact='deactivate'
 alias nv='nvim'
+alias vi='nvim'
 
 # Completion Settings
 autoload -Uz compinit
@@ -58,5 +59,5 @@ function fzf-history-selection() {
 zle -N fzf-history-selection
 
 # Loading time
-zsh_end_time=$(date +%s%N)
-echo ".zshrc loading time: $(( (zsh_end_time - zsh_start_time) / 1000000 )) ms"
+## zsh_end_time=$(date +%s%N)
+## echo ".zshrc loading time: $(( (zsh_end_time - zsh_start_time) / 1000000 )) ms"
