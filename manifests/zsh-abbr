@@ -1,0 +1,3 @@
+# Reusable shell abbreviations.
+require:sheldon
+stow:zsh-abbr

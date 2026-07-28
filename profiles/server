@@ -1,0 +1,5 @@
+# Shell baseline plus practical SSH/server tools.
+profile:shell
+cli-tools
+tmux
+fastfetch

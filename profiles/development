@@ -1,0 +1,7 @@
+# Full Linux development environment.
+profile:server
+dev-tools
+github
+nvim
+dev-abbr
+codex

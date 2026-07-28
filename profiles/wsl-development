@@ -1,0 +1,3 @@
+# Development profile with WSL-safe defaults.
+# win32yank remains an explicit optional module because it requires Windows interop.
+profile:development

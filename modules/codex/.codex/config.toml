@@ -1,0 +1,11 @@
+model = "gpt-5.6-sol"
+model_reasoning_effort = "medium"
+personality = "pragmatic"
+model_verbosity = "low"
+
+[features]
+memories = true
+
+[memories]
+generate_memories = true
+use_memories = true

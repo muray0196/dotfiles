@@ -1,0 +1,4 @@
+# WSL clipboard bridge inherited from the legacy repository.
+native:base
+native:wsl
+action:win32yank

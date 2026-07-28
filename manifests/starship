@@ -1,0 +1,4 @@
+# Starship prompt managed by Homebrew.
+native:base
+brew:starship
+stow:starship

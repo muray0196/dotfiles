@@ -1,0 +1,3 @@
+# GitHub CLI. Authentication and SSH-key registration remain explicit actions.
+native:base
+brew:github

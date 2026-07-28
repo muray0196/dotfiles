@@ -1,0 +1,17 @@
+use_default_settings: true
+
+general:
+  instance_name: "Local Search"
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json
+
+server:
+  bind_address: "0.0.0.0"
+  port: 8080
+  secret_key: "__SEARXNG_SECRET__"
+  limiter: false
+  image_proxy: true

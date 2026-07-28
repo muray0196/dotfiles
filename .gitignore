@@ -1,0 +1,17 @@
+*.log
+.tests/
+.repro/
+data/
+debug/
+tt.*
+foo.*
+doc/tags
+
+lazyvim.json
+lazy-lock.json
+.neoconf.json
+
+services/search-stack/.env
+__pycache__/
+*.py[cod]
+services/search-stack/crawl-results.json

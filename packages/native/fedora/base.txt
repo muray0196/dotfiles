@@ -1,0 +1,14 @@
+ca-certificates
+curl
+file
+gcc
+gcc-c++
+git
+make
+patch
+procps-ng
+stow
+unzip
+util-linux-user
+zsh
+openssh-clients

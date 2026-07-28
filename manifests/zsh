@@ -1,0 +1,3 @@
+# Zsh and the common shell configuration.
+native:base
+stow:zsh

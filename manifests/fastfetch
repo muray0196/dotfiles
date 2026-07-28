@@ -1,0 +1,4 @@
+# Distro-neutral system summary.
+native:base
+brew:fastfetch
+stow:fastfetch

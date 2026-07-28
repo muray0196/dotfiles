@@ -1,0 +1,5 @@
+[user]
+	name = muray0196
+	email = howmuch2733@gmail.com
+[include]
+	path = ~/.gitconfig.local

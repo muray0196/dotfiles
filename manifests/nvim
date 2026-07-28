@@ -1,0 +1,4 @@
+# Existing LazyVim configuration and formatting tool.
+native:development
+brew:nvim
+stow:nvim
