@@ -1,4 +1,4 @@
-# Existing LazyVim configuration and formatting tool.
-native:development
+# Existing LazyVim configuration with native Homebrew and Neovim prerequisites.
+native:base
 brew:nvim
 stow:nvim

@@ -97,11 +97,47 @@ assert_contains() {
   }
 }
 
-for profile in shell server development wsl-development; do
+assert_not_contains() {
+  local needle="$1"
+  shift
+  if array_contains "$needle" "$@"; then
+    printf 'unexpected %s in: %s\n' "$needle" "$*" >&2
+    exit 1
+  fi
+}
+
+brew_formula_is_resolved() {
+  local formula="$1"
+  local group
+
+  for group in "${BREW_GROUPS[@]}"; do
+    grep -Fqx "brew \"$formula\"" "$DOTFILES_ROOT/packages/brew/$group.Brewfile" && return 0
+  done
+  return 1
+}
+
+baseline_modules=(zsh starship sheldon zsh-abbr git nvim)
+
+for profile_file in "$DOTFILES_ROOT"/profiles/*; do
+  [[ -f "$profile_file" ]] || continue
+  profile="$(basename "$profile_file")"
   reset_resolution
   resolve_profile "$profile"
+  for module in "${baseline_modules[@]}"; do
+    assert_contains "$module" "${SELECTED_MODULES[@]}"
+  done
+  ((${#BREW_GROUPS[@]} > 0)) || {
+    printf 'profile must resolve Homebrew packages: %s\n' "$profile" >&2
+    exit 1
+  }
+  if brew_formula_is_resolved stylua; then
+    assert_contains dev-tools "${SELECTED_MODULES[@]}"
+  else
+    assert_not_contains dev-tools "${SELECTED_MODULES[@]}"
+  fi
   printf 'ok  %-16s %s\n' "$profile" "${SELECTED_MODULES[*]}"
 done
+printf 'ok  every profile resolves the shared Linux baseline and Homebrew packages\n'
 
 reset_resolution
 resolve_module zsh-abbr
@@ -110,16 +146,36 @@ assert_contains sheldon-lock "${ACTIONS[@]}"
 printf 'ok  zsh-abbr resolves Sheldon dependency\n'
 
 reset_resolution
+resolve_module nvim
+assert_contains base "${NATIVE_GROUPS[@]}"
+assert_not_contains development "${NATIVE_GROUPS[@]}"
+assert_contains nvim "${BREW_GROUPS[@]}"
+brew_formula_is_resolved neovim
+if brew_formula_is_resolved stylua; then
+  printf 'the nvim module must not resolve Stylua\n' >&2
+  exit 1
+fi
+printf 'ok  nvim resolves baseline native prerequisites without development tools\n'
+
+reset_resolution
 resolve_profile server
-if array_contains dev-abbr "${SELECTED_MODULES[@]}"; then
-  printf 'server must not include development abbreviations\n' >&2
+assert_not_contains dev-tools "${SELECTED_MODULES[@]}"
+assert_not_contains dev-abbr "${SELECTED_MODULES[@]}"
+brew_formula_is_resolved neovim
+if brew_formula_is_resolved stylua; then
+  printf 'server must not include Stylua\n' >&2
   exit 1
 fi
 
-reset_resolution
-resolve_profile development
-assert_contains dev-abbr "${SELECTED_MODULES[@]}"
-printf 'ok  development abbreviations remain profile-scoped\n'
+for profile in development wsl-development; do
+  reset_resolution
+  resolve_profile "$profile"
+  assert_contains dev-tools "${SELECTED_MODULES[@]}"
+  assert_contains dev-abbr "${SELECTED_MODULES[@]}"
+  brew_formula_is_resolved neovim
+  brew_formula_is_resolved stylua
+done
+printf 'ok  Stylua and development abbreviations remain development-only\n'
 BASH
 
 printf '\n== Installer dry-runs ==\n'
@@ -132,9 +188,25 @@ for distro in ubuntu fedora; do
     )"
     grep -Fq '[dotfiles] Installation complete' <<<"$output"
     grep -Fq 'stow --restow --no-folding' <<<"$output"
+    grep -Fq 'brew bundle' <<<"$output"
+    grep -Fq 'nvim.Brewfile' <<<"$output"
     printf 'ok  %s/%s\n' "$distro" "$profile"
     rm -rf "$test_home"
   done
+
+  test_home="$(mktemp -d)"
+  output="$(
+    HOME="$test_home" DOTFILES_DISTRO_OVERRIDE="$distro" \
+      "$ROOT/install.sh" --module nvim --dry-run --plan
+  )"
+  grep -Fq 'Native groups:    base' <<<"$output"
+  grep -Fq 'nvim.Brewfile' <<<"$output"
+  if grep -Fq 'development' <<<"$(grep -F 'Native groups:' <<<"$output")"; then
+    printf 'direct nvim install must not resolve development native packages\n' >&2
+    exit 1
+  fi
+  printf 'ok  %s/nvim module prerequisites\n' "$distro"
+  rm -rf "$test_home"
 done
 
 test_home="$(mktemp -d)"
@@ -146,6 +218,7 @@ if grep -Fq 'install-win32yank.sh' <<<"$output"; then
   printf 'win32yank must remain opt-in\n' >&2
   exit 1
 fi
+grep -Fq 'brew bundle' <<<"$output"
 printf 'ok  ubuntu/wsl-development (interop-safe default)\n'
 
 output="$(
@@ -220,6 +293,7 @@ if command -v stow >/dev/null 2>&1; then
     .config/starship.toml \
     .config/sheldon/plugins.toml \
     .config/zsh-abbr/user-abbreviations \
+    .config/nvim/init.lua \
     .gitconfig; do
     [[ -L "$test_home/$relative" ]] || {
       printf 'expected managed symlink: %s\n' "$relative" >&2
@@ -231,6 +305,7 @@ if command -v stow >/dev/null 2>&1; then
     "$ROOT/install.sh" --profile shell --unstow >/dev/null
   [[ ! -e "$test_home/.zshrc" && ! -L "$test_home/.zshrc" ]]
   [[ ! -e "$test_home/.config/starship.toml" && ! -L "$test_home/.config/starship.toml" ]]
+  [[ ! -e "$test_home/.config/nvim/init.lua" && ! -L "$test_home/.config/nvim/init.lua" ]]
   backup="$(find "$test_home/.local/state/dotfiles-linux/backups" -type f -name .zshrc -print -quit)"
   grep -Fqx 'legacy-zshrc' "$backup"
   printf 'ok  apply, backup, link verification, and unstow\n'

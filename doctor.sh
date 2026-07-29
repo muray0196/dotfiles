@@ -91,12 +91,10 @@ check_module_commands() {
     dev-tools)
       check_command node
       check_command uv
-      ;;
-    github) check_command gh ;;
-    nvim)
-      check_command nvim
       check_command stylua
       ;;
+    github) check_command gh ;;
+    nvim) check_command nvim ;;
     win32yank) check_command win32yank.exe ;;
     zsh-abbr | dev-abbr | codex) ;;
   esac
@@ -123,6 +121,10 @@ check_stow_module() {
 platform_label="$PLATFORM_ID $PLATFORM_VERSION"
 is_wsl && platform_label+=" (WSL)"
 printf 'Platform: %s\n' "$platform_label"
+
+if ((${#BREW_GROUPS[@]} > 0)); then
+  check_command brew
+fi
 
 if ((${#STOW_MODULES[@]} > 0)); then
   check_command stow

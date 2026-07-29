@@ -1,2 +1,1 @@
 brew "neovim"
-brew "stylua"
