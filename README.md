@@ -17,10 +17,12 @@ macOSや他ディストリビューションは現在対象外。
 
 | プロファイル | 内容 | 主な用途 |
 |---|---|---|
-| `shell` | Zsh、Starship、Sheldon、zsh-abbr、Git | 最小CLI環境 |
+| `shell` | Homebrew、Zsh、Starship、Sheldon、zsh-abbr、Git、Neovim | 共通Linuxベースライン |
 | `server` | `shell` + fzf、ripgrep、tmux、Fastfetch | Ubuntu/Fedoraのサーバー |
-| `development` | `server` + Node.js、uv、gh、Neovim、Stylua、開発用略語、Codex設定 | ネイティブLinux開発環境 |
+| `development` | `server` + Node.js、uv、gh、Stylua、開発用略語、Codex設定 | ネイティブLinux開発環境 |
 | `wsl-development` | `development`と同等。Windows interop依存は含めない | WSL開発環境 |
+
+すべてのプロファイルは`shell`の内容を共通ベースラインとして、Homebrew、Zsh、Starship、既存のSheldonプラグイン、zsh-abbr、Git、Neovimとその設定を導入する。HomebrewはStowモジュールではなく、選択されたBrewfileを適用する前に必要に応じて自動導入される基盤として扱う。
 
 この構成では、UbuntuのLLM処理用PCとFedoraの常時稼働サーバーは基本的に`server`、WSLは`wsl-development`を使う。開発作業を行うサブPCだけ`development`へ上げる。
 
@@ -64,8 +66,11 @@ Windows interopを有効にしており、従来のwin32yankが必要な場合�
 
 ```bash
 ./install.sh --module starship
+./install.sh --module nvim
 ./install.sh --module tmux --module fastfetch
 ```
+
+`nvim`モジュールを単独で指定した場合も、HomebrewとNeovimに必要なネイティブパッケージを解決する。Styluaは含まれず、`development`と`wsl-development`だけに追加される。
 
 一覧:
 
@@ -77,8 +82,9 @@ Windows interopを有効にしており、従来のwin32yankが必要な場合�
 
 OSと密接なパッケージは`apt`または`dnf`、ユーザー向けCLIはLinuxbrewで管理する。
 
-- `apt` / `dnf`: Zsh、Git、Stow、tmux、ビルド依存
-- Linuxbrew: Starship、Sheldon、fzf、ripgrep、Fastfetch、Neovim、Node.js、uv、gh、Stylua
+- `apt` / `dnf`: Zsh、Git、Stow、tmux、Homebrew・Neovim用のネイティブ依存、開発用Python
+- Linuxbrew（全プロファイルの基盤）: Starship、Sheldon、Neovim
+- Linuxbrew（追加機能）: fzf、ripgrep、Fastfetch、Node.js、uv、gh、Stylua
 
 Linuxbrew側はモジュール別のBrewfileで管理する。更新時にGitHub Releasesを手で追う必要はない。
 
@@ -123,6 +129,8 @@ Git設定は`~/.gitconfig.local`を最後に読み込む。ホストごとの署
 ./doctor.sh --profile server
 ./tests/smoke.sh
 ```
+
+`doctor.sh`は、選択したプロファイルがHomebrewパッケージを解決する場合に`brew`も検査する。スモークテストは全プロファイルの共通ベースライン、Neovimの存在、Styluaの開発プロファイル限定、Ubuntu/Fedora/WSLのdry-run解決を検証する。
 
 ## 明示的に分離した副作用
 

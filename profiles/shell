@@ -1,6 +1,7 @@
-# Portable interactive shell baseline.
+# Portable interactive shell and editor baseline.
 zsh
 starship
 sheldon
 zsh-abbr
 git
+nvim
