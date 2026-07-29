@@ -9,6 +9,15 @@ while IFS= read -r -d '' script; do
   bash -n "$script"
   printf 'ok  %s\n' "${script#"$ROOT"/}"
 done < <(find "$ROOT" -type f -name '*.sh' -print0 | sort -z)
+bash -n "$ROOT/modules/dotfiles-cli/.local/bin/dotfiles"
+printf 'ok  modules/dotfiles-cli/.local/bin/dotfiles\n'
+for entrypoint in cleanup.sh modules/dotfiles-cli/.local/bin/dotfiles; do
+  [[ -x "$ROOT/$entrypoint" ]] || {
+    printf 'entry point is not executable: %s\n' "$entrypoint" >&2
+    exit 1
+  }
+done
+printf 'ok  new command entry points are executable\n'
 
 printf '\n== Structured configuration ==\n'
 python3 - "$ROOT" <<'PY'
@@ -116,7 +125,7 @@ brew_formula_is_resolved() {
   return 1
 }
 
-baseline_modules=(zsh starship sheldon zsh-abbr git nvim)
+baseline_modules=(zsh starship sheldon zsh-abbr git nvim dotfiles-cli)
 
 for profile_file in "$DOTFILES_ROOT"/profiles/*; do
   [[ -f "$profile_file" ]] || continue
@@ -280,6 +289,56 @@ BASH
 printf 'ok  legacy parent-directory symlink is preserved\n'
 rm -rf "$test_home" "$legacy_dir"
 
+printf '\n== Installation state ==\n'
+test_home="$(mktemp -d)"
+HOME="$test_home" DOTFILES_ROOT="$ROOT" bash <<'BASH'
+set -euo pipefail
+source "$DOTFILES_ROOT/lib/common.sh"
+source "$DOTFILES_ROOT/lib/state.sh"
+
+STOW_MODULES=(dotfiles-cli)
+record_installation_state server
+grep -Fqx 'profile:server' "$DOTFILES_SELECTION_FILE"
+grep -Fqx '.local/bin/dotfiles' "$DOTFILES_MANAGED_PATHS_FILE"
+
+STOW_MODULES=()
+record_installation_state "" win32yank
+grep -Fqx 'profile:server' "$DOTFILES_SELECTION_FILE"
+grep -Fqx 'module:win32yank' "$DOTFILES_SELECTION_FILE"
+grep -Fqx '.local/bin/dotfiles' "$DOTFILES_MANAGED_PATHS_FILE"
+
+mkdir -p "$HOME/.local/bin"
+ln -s "$DOTFILES_ROOT/modules/dotfiles-cli/.local/bin/dotfiles" "$HOME/.local/bin/dotfiles"
+expected_paths=()
+reconcile_stale_managed_links 1 expected_paths
+[[ -L "$HOME/.local/bin/dotfiles" ]]
+reconcile_stale_managed_links 0 expected_paths
+[[ ! -e "$HOME/.local/bin/dotfiles" && ! -L "$HOME/.local/bin/dotfiles" ]]
+
+printf 'user-owned\n' >"$HOME/.local/bin/dotfiles"
+reconcile_stale_managed_links 0 expected_paths
+grep -Fqx 'user-owned' "$HOME/.local/bin/dotfiles"
+BASH
+
+old_backup="$test_home/.local/state/dotfiles-linux/backups/20000101-000000-1"
+mkdir -p "$old_backup"
+touch -d '40 days ago' "$old_backup"
+output="$(
+  HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
+    "$ROOT/cleanup.sh" --dry-run --backups-older-than 30d
+)"
+grep -Fq "remove old backup $old_backup" <<<"$output"
+[[ -d "$old_backup" ]]
+HOME="$test_home" DOTFILES_ROOT="$ROOT" bash <<'BASH'
+set -euo pipefail
+source "$DOTFILES_ROOT/lib/common.sh"
+source "$DOTFILES_ROOT/lib/state.sh"
+prune_old_backups 30d 0
+BASH
+[[ ! -d "$old_backup" ]]
+printf 'ok  saved state, safe link cleanup, and guarded backup pruning\n'
+rm -rf "$test_home"
+
 if command -v stow >/dev/null 2>&1; then
   printf '\n== GNU Stow integration ==\n'
   test_home="$(mktemp -d)"
@@ -294,12 +353,19 @@ if command -v stow >/dev/null 2>&1; then
     .config/sheldon/plugins.toml \
     .config/zsh-abbr/user-abbreviations \
     .config/nvim/init.lua \
+    .local/bin/dotfiles \
     .gitconfig; do
     [[ -L "$test_home/$relative" ]] || {
       printf 'expected managed symlink: %s\n' "$relative" >&2
       exit 1
     }
   done
+
+  grep -Fqx 'profile:shell' "$test_home/.local/state/dotfiles-linux/selection"
+  grep -Fqx '.local/bin/dotfiles' "$test_home/.local/state/dotfiles-linux/managed-paths"
+  status_output="$(HOME="$test_home" "$test_home/.local/bin/dotfiles" status)"
+  grep -Fq 'Profile:    shell' <<<"$status_output"
+  printf 'ok  installation selection and managed paths are recorded\n'
 
   HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
     "$ROOT/install.sh" --profile shell --unstow >/dev/null
@@ -309,6 +375,49 @@ if command -v stow >/dev/null 2>&1; then
   backup="$(find "$test_home/.local/state/dotfiles-linux/backups" -type f -name .zshrc -print -quit)"
   grep -Fqx 'legacy-zshrc' "$backup"
   printf 'ok  apply, backup, link verification, and unstow\n'
+  rm -rf "$test_home"
+
+  printf '\n== Managed state and CLI ==\n'
+  test_home="$(mktemp -d)"
+  HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
+    "$ROOT/install.sh" --profile development --no-packages >/dev/null
+  [[ -L "$test_home/.codex/config.toml" ]]
+  [[ -L "$test_home/.config/zsh-abbr/extra/development.zsh" ]]
+
+  HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
+    "$ROOT/install.sh" --profile server --no-packages >/dev/null
+  [[ ! -e "$test_home/.codex/config.toml" && ! -L "$test_home/.codex/config.toml" ]]
+  [[ ! -e "$test_home/.config/zsh-abbr/extra/development.zsh" &&
+    ! -L "$test_home/.config/zsh-abbr/extra/development.zsh" ]]
+  grep -Fqx 'profile:server' "$test_home/.local/state/dotfiles-linux/selection"
+  printf 'ok  applying a smaller profile removes stale managed links\n'
+
+  output="$(
+    HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
+      "$test_home/.local/bin/dotfiles" update --dry-run --no-pull
+  )"
+  grep -Fq 'Selected modules:' <<<"$output"
+  grep -Fq 'brew bundle upgrade' <<<"$output"
+  grep -Fq "$ROOT/doctor.sh" <<<"$output"
+  printf 'ok  unified update uses the saved profile\n'
+
+  output="$(
+    HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
+      "$test_home/.local/bin/dotfiles" cleanup --dry-run --system-cache
+  )"
+  grep -Fq 'brew cleanup' <<<"$output"
+  grep -Fq 'sudo apt-get clean' <<<"$output"
+  printf 'ok  cleanup previews selected Homebrew and system cache operations\n'
+
+  HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
+    "$test_home/.local/bin/dotfiles" uninstall --dry-run >/dev/null
+  [[ -f "$test_home/.local/state/dotfiles-linux/selection" ]]
+
+  HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
+    "$test_home/.local/bin/dotfiles" uninstall >/dev/null
+  [[ ! -e "$test_home/.local/bin/dotfiles" && ! -L "$test_home/.local/bin/dotfiles" ]]
+  [[ ! -e "$test_home/.local/state/dotfiles-linux/selection" ]]
+  printf 'ok  uninstall removes links and state while preserving packages\n'
   rm -rf "$test_home"
 fi
 
@@ -338,6 +447,7 @@ if command -v shellcheck >/dev/null 2>&1; then
   mapfile -d '' scripts < <(
     find "$ROOT" -type f -name '*.sh' ! -path "$ROOT/lib/*" -print0 | sort -z
   )
+  scripts+=("$ROOT/modules/dotfiles-cli/.local/bin/dotfiles")
   shellcheck -x "${scripts[@]}"
   printf 'ok  shellcheck\n'
 fi

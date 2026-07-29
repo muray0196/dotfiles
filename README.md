@@ -42,24 +42,53 @@ Use the WSL profile on WSL.
 ```
 
 Running `./install.sh` without arguments is equivalent to using `--profile shell`.
+The applied profile and managed links are recorded under `~/.local/state/dotfiles-linux/`.
 
-## Common commands
+## Routine operations
+
+Start a new Zsh session after installation. The unified command is then available from anywhere.
+
+```bash
+# Show the active repository, revision, and profile
+dotfiles status
+
+# Preview and apply repository, package, plugin, and configuration updates
+dotfiles update --dry-run
+dotfiles update
+
+# Preview and clean stale managed links and old selected Homebrew versions
+dotfiles cleanup --dry-run
+dotfiles cleanup
+
+# Optionally clean the native package cache
+dotfiles cleanup --system-cache
+
+# Validate the saved selection
+dotfiles doctor
+```
+
+`dotfiles update` requires a clean repository and uses `git pull --ff-only` before reconciling the saved selection.
+`dotfiles cleanup` never runs `apt autoremove` or `dnf autoremove`, and it does not delete backups by default.
+Backup pruning must be requested explicitly:
+
+```bash
+dotfiles cleanup --backups-older-than 30d
+```
+
+## Other commands
 
 ```bash
 # List profiles and modules
 ./install.sh --list
 
+# Apply another profile
+dotfiles apply development
+
 # Install individual modules
 ./install.sh --module tmux --module fastfetch
 
-# Update selected Homebrew packages and Sheldon plugins
-./update.sh --profile development
-
-# Check the installed environment
-./doctor.sh --profile development
-
-# Remove managed symlinks
-./install.sh --profile server --unstow
+# Preview removal of managed links and installation state
+dotfiles uninstall --dry-run
 
 # Validate the repository
 ./tests/smoke.sh
@@ -79,6 +108,7 @@ profiles/   Profile definitions
 manifests/  Module dependencies and installation definitions
 packages/   apt, dnf, and Homebrew package definitions
 modules/    Configuration deployed with GNU Stow
+lib/        Shared installer, state, and cleanup implementation
 scripts/    Explicit additional setup tasks
 services/   Optional services
 tests/      Validation

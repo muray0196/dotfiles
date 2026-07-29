@@ -11,6 +11,8 @@ source "$DOTFILES_ROOT/lib/common.sh"
 source "$DOTFILES_ROOT/lib/platform.sh"
 # shellcheck source=lib/profile.sh
 source "$DOTFILES_ROOT/lib/profile.sh"
+# shellcheck source=lib/state.sh
+source "$DOTFILES_ROOT/lib/state.sh"
 
 PROFILE=""
 MODULE_ARGS=()
@@ -19,6 +21,9 @@ FAILURES=0
 usage() {
   cat <<'USAGE'
 Usage: ./doctor.sh [--profile NAME] [--module NAME ...]
+
+Without an explicit selection, the saved selection is used when available;
+otherwise the shell profile is checked.
 USAGE
 }
 
@@ -44,7 +49,9 @@ while (($# > 0)); do
 done
 
 if [[ -z "$PROFILE" && ${#MODULE_ARGS[@]} -eq 0 ]]; then
-  PROFILE="shell"
+  if ! load_installation_selection PROFILE MODULE_ARGS; then
+    PROFILE="shell"
+  fi
 fi
 
 reset_resolution
@@ -96,7 +103,7 @@ check_module_commands() {
     github) check_command gh ;;
     nvim) check_command nvim ;;
     win32yank) check_command win32yank.exe ;;
-    zsh-abbr | dev-abbr | codex) ;;
+    zsh-abbr | dev-abbr | codex | dotfiles-cli) ;;
   esac
 }
 

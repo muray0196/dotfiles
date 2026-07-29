@@ -15,6 +15,8 @@ source "$DOTFILES_ROOT/lib/profile.sh"
 source "$DOTFILES_ROOT/lib/packages.sh"
 # shellcheck source=lib/deploy.sh
 source "$DOTFILES_ROOT/lib/deploy.sh"
+# shellcheck source=lib/state.sh
+source "$DOTFILES_ROOT/lib/state.sh"
 
 PROFILE=""
 MODULE_ARGS=()
@@ -139,6 +141,13 @@ else
   info "Package installation skipped"
 fi
 
+# shellcheck disable=SC2034  # Read through a nameref in reconcile_stale_managed_links.
+expected_managed_paths=()
+collect_resolved_managed_paths expected_managed_paths
+if [[ -n "$PROFILE" ]] && installation_state_exists; then
+  reconcile_stale_managed_links "$DRY_RUN" expected_managed_paths
+fi
+
 deploy_modules
 
 run_action() {
@@ -168,6 +177,10 @@ run_action() {
 for action in "${ACTIONS[@]}"; do
   run_action "$action"
 done
+
+if [[ "$DRY_RUN" != "1" ]]; then
+  record_installation_state "$PROFILE" "${MODULE_ARGS[@]}"
+fi
 
 if [[ "$SET_SHELL" == "1" ]]; then
   if [[ "$DRY_RUN" == "1" ]]; then

@@ -13,6 +13,8 @@ source "$DOTFILES_ROOT/lib/platform.sh"
 source "$DOTFILES_ROOT/lib/profile.sh"
 # shellcheck source=lib/packages.sh
 source "$DOTFILES_ROOT/lib/packages.sh"
+# shellcheck source=lib/state.sh
+source "$DOTFILES_ROOT/lib/state.sh"
 
 PROFILE=""
 MODULE_ARGS=()
@@ -24,6 +26,7 @@ Usage: ./update.sh [--profile NAME] [--module NAME ...] [--dry-run]
 
 Updates only Homebrew packages selected by the profile/module and Sheldon
 plugins. It deliberately does not run apt upgrade or dnf upgrade.
+Without an explicit selection, the last successfully applied selection is used.
 USAGE
 }
 
@@ -53,7 +56,8 @@ while (($# > 0)); do
 done
 
 if [[ -z "$PROFILE" && ${#MODULE_ARGS[@]} -eq 0 ]]; then
-  PROFILE="shell"
+  load_installation_selection PROFILE MODULE_ARGS ||
+    die "No saved installation selection. Run install.sh or specify --profile."
 fi
 
 reset_resolution

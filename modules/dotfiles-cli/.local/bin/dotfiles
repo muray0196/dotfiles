@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_PATH="$(readlink -f -- "${BASH_SOURCE[0]}")"
+DOTFILES_ROOT="$(cd -- "$(dirname -- "$SCRIPT_PATH")/../../../.." && pwd)"
+export DOTFILES_ROOT
+
+# shellcheck source=../../../../lib/common.sh
+source "$DOTFILES_ROOT/lib/common.sh"
+# shellcheck source=../../../../lib/state.sh
+source "$DOTFILES_ROOT/lib/state.sh"
+
+usage() {
+  cat <<'USAGE'
+Usage: dotfiles COMMAND [options]
+
+Commands:
+  apply PROFILE [options]  Apply a profile through install.sh
+  update [options]         Pull, reconcile, update packages/plugins, and validate
+  cleanup [options]        Remove stale links and clean selected package artifacts
+  doctor [options]         Validate the saved selection
+  status                   Show the repository and saved selection
+  uninstall [--dry-run]    Remove managed links while preserving packages and backups
+  help                     Show this help
+
+Update options:
+  --dry-run                Show operations without applying them
+  --no-pull                Skip git pull
+
+Run "dotfiles cleanup --help" for cleanup-specific options.
+USAGE
+}
+
+saved_selection_args() {
+  local output_array_name="$1"
+  selection_to_args "$output_array_name" ||
+    die "No saved installation selection. Run 'dotfiles apply PROFILE' first."
+}
+
+update_configuration() {
+  local dry_run=0
+  local pull=1
+
+  while (($# > 0)); do
+    case "$1" in
+      --dry-run)
+        dry_run=1
+        shift
+        ;;
+      --no-pull)
+        pull=0
+        shift
+        ;;
+      -h | --help)
+        usage
+        return 0
+        ;;
+      *) die "Unknown update option: $1" ;;
+    esac
+  done
+
+  local selection_args=()
+  saved_selection_args selection_args
+
+  if [[ "$pull" == "1" ]]; then
+    require_command git
+    if [[ "$dry_run" == "1" ]]; then
+      print_command git -C "$DOTFILES_ROOT" pull --ff-only
+    else
+      local worktree_status
+      worktree_status="$(git -C "$DOTFILES_ROOT" status --porcelain)"
+      [[ -z "$worktree_status" ]] ||
+        die "Repository has local changes; commit or remove them before updating"
+      git -C "$DOTFILES_ROOT" pull --ff-only
+    fi
+  fi
+
+  local install_args=("${selection_args[@]}")
+  local update_args=("${selection_args[@]}")
+  if [[ "$dry_run" == "1" ]]; then
+    install_args+=(--dry-run --plan)
+    update_args+=(--dry-run)
+  fi
+
+  "$DOTFILES_ROOT/install.sh" "${install_args[@]}"
+  "$DOTFILES_ROOT/update.sh" "${update_args[@]}"
+
+  if [[ "$dry_run" == "1" ]]; then
+    print_command "$DOTFILES_ROOT/doctor.sh" "${selection_args[@]}"
+  else
+    "$DOTFILES_ROOT/doctor.sh" "${selection_args[@]}"
+  fi
+}
+
+show_status() {
+  (($# == 0)) || die "Usage: dotfiles status"
+
+  local saved_profile=""
+  local saved_modules=()
+  load_installation_selection saved_profile saved_modules ||
+    die "No saved installation selection"
+
+  printf 'Repository: %s\n' "$DOTFILES_ROOT"
+  if command -v git >/dev/null 2>&1 &&
+    git -C "$DOTFILES_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf 'Revision:   %s\n' "$(git -C "$DOTFILES_ROOT" rev-parse --short HEAD)"
+  fi
+  printf 'Profile:    %s\n' "${saved_profile:-(none)}"
+  printf 'Modules:    %s\n' "${saved_modules[*]:-(none)}"
+}
+
+uninstall_configuration() {
+  local dry_run=0
+
+  while (($# > 0)); do
+    case "$1" in
+      --dry-run)
+        dry_run=1
+        shift
+        ;;
+      -h | --help)
+        printf 'Usage: dotfiles uninstall [--dry-run]\n'
+        return 0
+        ;;
+      *) die "Unknown uninstall option: $1" ;;
+    esac
+  done
+
+  local selection_args=()
+  saved_selection_args selection_args
+  local uninstall_args=("${selection_args[@]}" --unstow)
+  [[ "$dry_run" == "1" ]] && uninstall_args+=(--dry-run)
+
+  "$DOTFILES_ROOT/install.sh" "${uninstall_args[@]}"
+
+  if [[ "$dry_run" == "1" ]]; then
+    printf '[dry-run] remove installation state under %q\n' "$DOTFILES_STATE_ROOT"
+  else
+    clear_installation_state
+    info "Installation state removed. Packages and backups were left untouched."
+  fi
+}
+
+command_name="${1:-help}"
+(($# > 0)) && shift
+
+case "$command_name" in
+  apply)
+    (($# > 0)) || die "Usage: dotfiles apply PROFILE [install options]"
+    profile="$1"
+    shift
+    "$DOTFILES_ROOT/install.sh" --profile "$profile" "$@"
+    ;;
+  update) update_configuration "$@" ;;
+  cleanup) "$DOTFILES_ROOT/cleanup.sh" "$@" ;;
+  doctor) "$DOTFILES_ROOT/doctor.sh" "$@" ;;
+  status) show_status "$@" ;;
+  uninstall) uninstall_configuration "$@" ;;
+  help | -h | --help) usage ;;
+  *) die "Unknown command: $command_name" ;;
+esac

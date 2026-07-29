@@ -64,6 +64,24 @@ install_brew_packages() {
   done
 }
 
+collect_brew_formulae() {
+  local output_array_name="$1"
+  local -n output_array="$output_array_name"
+  local group file line
+
+  output_array=()
+  for group in "${BREW_GROUPS[@]}"; do
+    file="$DOTFILES_ROOT/packages/brew/$group.Brewfile"
+    [[ -f "$file" ]] || die "Brewfile is missing: $group"
+
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^brew[[:space:]]+\"([^\"]+)\" ]]; then
+        add_unique "$output_array_name" "${BASH_REMATCH[1]}"
+      fi
+    done < <(read_definition_lines "$file")
+  done
+}
+
 update_brew_packages() {
   ((${#BREW_GROUPS[@]} > 0)) || return 0
   if ! load_brew_environment; then
@@ -83,4 +101,40 @@ update_brew_packages() {
     info "Upgrading Brewfile: $group"
     run "$BREW_BIN" bundle upgrade --file="$file"
   done
+}
+
+cleanup_brew_packages() {
+  ((${#BREW_GROUPS[@]} > 0)) || return 0
+
+  local formulae=()
+  collect_brew_formulae formulae
+  ((${#formulae[@]} > 0)) || return 0
+
+  if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    if ! load_brew_environment; then
+      BREW_BIN="brew"
+    fi
+    run "$BREW_BIN" cleanup "${formulae[@]}"
+    return 0
+  fi
+
+  if ! load_brew_environment; then
+    warn "Homebrew is unavailable; package cleanup was skipped"
+    return 0
+  fi
+
+  local installed=()
+  local formula
+  for formula in "${formulae[@]}"; do
+    if "$BREW_BIN" list --formula "$formula" >/dev/null 2>&1; then
+      installed+=("$formula")
+    fi
+  done
+
+  if ((${#installed[@]} > 0)); then
+    info "Cleaning old Homebrew versions for the selected configuration"
+    "$BREW_BIN" cleanup "${installed[@]}"
+  else
+    info "No selected Homebrew formulae are installed; cleanup was skipped"
+  fi
 }
