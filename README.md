@@ -1,4 +1,4 @@
-# dotfiles-linux
+# dotfiles
 
 Linux dotfiles shared across Ubuntu, Fedora, and WSL.
 Choose a profile to build anything from a minimal shell setup to a full development environment.
@@ -24,8 +24,8 @@ Choose a profile to build anything from a minimal shell setup to a full developm
 Clone the repository and start the guided installer.
 
 ```bash
-git clone git@github.com:muray0196/dotfiles-linux.git ~/dotfiles-linux
-cd ~/dotfiles-linux
+git clone git@github.com:muray0196/dotfiles.git ~/dotfiles
+cd ~/dotfiles
 ./install.sh
 ```
 

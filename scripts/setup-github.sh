@@ -12,7 +12,7 @@ require_command git
 require_command ssh-keygen
 
 SSH_KEY_PATH="${SSH_KEY_PATH:-$HOME/.ssh/id_ed25519}"
-GITHUB_REMOTE="${GITHUB_REMOTE:-git@github.com:muray0196/dotfiles-linux.git}"
+GITHUB_REMOTE="${GITHUB_REMOTE:-git@github.com:muray0196/dotfiles.git}"
 
 mkdir -p "$HOME/.ssh"
 chmod 0700 "$HOME/.ssh"
@@ -38,7 +38,7 @@ REGISTERED_KEYS="$(gh api user/keys --paginate --jq '.[].key')"
 if printf '%s\n' "$REGISTERED_KEYS" | grep -Fqx "$SSH_PUBLIC_KEY"; then
   info "SSH key is already registered with GitHub"
 else
-  gh ssh-key add "$SSH_KEY_PATH.pub" --title "$(hostname)-dotfiles-linux"
+  gh ssh-key add "$SSH_KEY_PATH.pub" --title "$(hostname)-dotfiles"
 fi
 
 if git -C "$DOTFILES_ROOT" remote get-url origin >/dev/null 2>&1; then
