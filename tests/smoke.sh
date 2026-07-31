@@ -439,7 +439,10 @@ if command -v stow >/dev/null 2>&1; then
   )"
   grep -Fq 'Selected modules:' <<<"$output"
   grep -Fq 'brew bundle upgrade' <<<"$output"
-  grep -Fq 'mise upgrade node' <<<"$output"
+  if grep -Fq 'mise upgrade node' <<<"$output"; then
+    printf 'server update must not include mise-managed Node.js\n' >&2
+    exit 1
+  fi
   grep -Fq "$ROOT/doctor.sh" <<<"$output"
   printf 'ok  unified update uses the saved profile\n'
 
