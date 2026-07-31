@@ -1,2 +1,3 @@
 # Unified command for routine repository operations.
+native:stow
 stow:dotfiles-cli

@@ -163,6 +163,20 @@ run_action() {
         warn "Sheldon is unavailable; plugin lock was skipped"
       fi
       ;;
+    mise-install)
+      if [[ "$DRY_RUN" == "1" ]]; then
+        print_command mise install node
+      elif command -v mise >/dev/null 2>&1; then
+        if mise which node >/dev/null 2>&1; then
+          info "Configured Node.js is already installed"
+        else
+          info "Installing configured Node.js with mise"
+          mise install node
+        fi
+      else
+        warn "mise is unavailable; Node.js installation was skipped"
+      fi
+      ;;
     win32yank)
       if [[ "$DRY_RUN" == "1" ]]; then
         print_command "$DOTFILES_ROOT/scripts/install-win32yank.sh"

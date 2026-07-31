@@ -1,1 +1,0 @@
-# WSL development is not expected on Fedora, but the group is kept resolvable.

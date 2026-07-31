@@ -1,3 +1,3 @@
-brew "node"
+brew "mise"
 brew "uv"
 brew "stylua"

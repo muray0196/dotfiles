@@ -4,7 +4,3 @@ curl
 file
 git
 procps
-stow
-unzip
-zsh
-openssh-client

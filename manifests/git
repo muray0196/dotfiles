@@ -1,3 +1,4 @@
 # Common Git configuration.
-native:base
+native:git
+native:stow
 stow:git

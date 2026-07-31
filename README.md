@@ -16,7 +16,7 @@ Choose a profile to build anything from a minimal shell setup to a full developm
 |---|---|
 | `shell` | Shared baseline with Zsh, Git, Neovim, and related tools |
 | `server` | Adds tmux and general CLI tools to `shell` |
-| `development` | Adds Node.js, uv, gh, Stylua, Codex configuration, and other development tools to `server` |
+| `development` | Adds Node.js 24 through mise, uv, gh, Stylua, Codex configuration, and other development tools to `server` |
 | `wsl-development` | Development environment for WSL |
 
 ## Installation
@@ -100,6 +100,20 @@ Conflicting files are preserved under `~/.local/state/dotfiles-linux/backups/`.
 Place machine-specific settings in `~/.zshrc.local` and `~/.gitconfig.local`.
 
 Additional setup for GitHub authentication, Docker, SearXNG, and similar tools must be run explicitly from `scripts/`.
+
+## Package ownership
+
+System integration and Homebrew prerequisites are installed with `apt` or `dnf`.
+User-facing CLI tools are installed with Homebrew, while language runtimes are managed by mise.
+
+| Owner | Packages |
+|---|---|
+| `apt` / `dnf` | Zsh, Git, Stow, tmux, OpenSSH, Python, and Homebrew build prerequisites |
+| Homebrew | Starship, Sheldon, Neovim, fzf, ripgrep, fastfetch, uv, Stylua, gh, and mise |
+| mise | Node.js 24 |
+
+Normal profile application uses `brew bundle --no-upgrade`; Homebrew and mise upgrades remain explicit through `dotfiles update`.
+The Fedora Homebrew bootstrap installs the official `development-tools` package group.
 
 ## Repository layout
 

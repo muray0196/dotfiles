@@ -8,7 +8,24 @@ STACK_DIR="${SEARCH_STACK_DIR:-$HOME/services/search-stack}"
 
 # shellcheck source=../lib/common.sh
 source "$DOTFILES_ROOT/lib/common.sh"
+# shellcheck source=../lib/platform.sh
+source "$DOTFILES_ROOT/lib/platform.sh"
+
+detect_platform
 require_command docker
+
+if ! command -v openssl >/dev/null 2>&1; then
+  info "Installing OpenSSL for search-stack secret generation"
+  case "$PLATFORM_ID" in
+    ubuntu)
+      sudo apt-get update
+      sudo apt-get install -y openssl
+      ;;
+    fedora)
+      sudo dnf install -y openssl
+      ;;
+  esac
+fi
 require_command openssl
 
 docker compose version >/dev/null 2>&1 || die "Docker Compose plugin is unavailable"
