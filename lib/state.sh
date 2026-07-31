@@ -74,6 +74,13 @@ collect_resolved_managed_paths() {
       add_unique "$output_array_name" "$relative"
     done < <(find "$module_dir" \( -type f -o -type l \) -print0 | sort -z)
   done
+
+  if array_contains starship-config "${ACTIONS[@]}"; then
+    add_unique "$output_array_name" ".config/starship.toml"
+  fi
+  if array_contains tmux-theme "${ACTIONS[@]}"; then
+    add_unique "$output_array_name" ".config/tmux/theme.conf"
+  fi
 }
 
 read_managed_paths() {

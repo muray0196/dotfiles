@@ -159,6 +159,12 @@ if array_contains win32yank "${ACTIONS[@]}" && ! is_wsl; then
 fi
 
 if [[ "$UNSTOW" == "1" ]]; then
+  if array_contains starship-config "${ACTIONS[@]}"; then
+    remove_starship_config_link
+  fi
+  if array_contains tmux-theme "${ACTIONS[@]}"; then
+    remove_tmux_theme_link
+  fi
   unstow_modules
   info "Managed links removed. Packages and backups were left untouched."
   exit 0
@@ -214,6 +220,8 @@ run_action() {
         "$DOTFILES_ROOT/scripts/install-win32yank.sh"
       fi
       ;;
+    starship-config) configure_starship ;;
+    tmux-theme) configure_tmux_theme ;;
     *) die "Unknown action: $action" ;;
   esac
 }

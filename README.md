@@ -49,6 +49,11 @@ Without a terminal, running `./install.sh` without arguments remains equivalent
 to using `--profile shell`.
 The applied profile and managed links are recorded under `~/.local/state/dotfiles-linux/`.
 
+Starship and tmux keep Ubuntu and Fedora color variants under `~/.config/`.
+During installation or profile reapplication, Fedora selects the Fedora
+variants; Ubuntu and the selector fallback use the Ubuntu variants. The active
+files are linked at `~/.config/starship.toml` and `~/.config/tmux/theme.conf`.
+
 ## Routine operations
 
 Start a new Zsh session after installation. The unified command is then available from anywhere.

@@ -2,3 +2,4 @@
 native:server
 native:stow
 stow:tmux
+action:tmux-theme

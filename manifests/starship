@@ -3,3 +3,4 @@ native:brew-bootstrap
 brew:starship
 native:stow
 stow:starship
+action:starship-config

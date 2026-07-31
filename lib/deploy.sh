@@ -78,6 +78,130 @@ backup_module_conflicts() {
   return 0
 }
 
+platform_config_variant() {
+  case "${PLATFORM_ID:-}" in
+    fedora) printf 'fedora' ;;
+    *) printf 'ubuntu' ;;
+  esac
+}
+
+starship_config_link_is_managed() {
+  local target="$HOME/.config/starship.toml"
+  [[ -L "$target" ]] || return 1
+
+  local link resolved legacy
+  link="$(readlink -- "$target")"
+  case "$link" in
+    starship/ubuntu.toml | starship/fedora.toml) return 0 ;;
+  esac
+
+  if [[ "$link" == /* ]]; then
+    resolved="$(readlink -m -- "$link")"
+  else
+    resolved="$(readlink -m -- "$(dirname "$target")/$link")"
+  fi
+  legacy="$(readlink -m -- "$DOTFILES_ROOT/modules/starship/.config/starship.toml")"
+  [[ "$resolved" == "$legacy" ]]
+}
+
+configure_starship() {
+  local variant config_dir source target link
+  variant="$(platform_config_variant)"
+  config_dir="$HOME/.config"
+  source="$config_dir/starship/$variant.toml"
+  target="$config_dir/starship.toml"
+  link="starship/$variant.toml"
+
+  [[ -e "$source" || "${DRY_RUN:-0}" == "1" ]] ||
+    die "Starship config variant is missing: $source"
+
+  if same_target "$target" "$source"; then
+    info "Starship config already selects $variant"
+    return 0
+  fi
+
+  if [[ -e "$target" || -L "$target" ]]; then
+    if starship_config_link_is_managed; then
+      run rm -- "$target"
+    else
+      backup_path "$target"
+    fi
+  fi
+
+  if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    print_command ln -s "$link" "$target"
+  else
+    mkdir -p "$config_dir"
+    ln -s "$link" "$target"
+  fi
+  info "Selected Starship config: $variant"
+}
+
+remove_starship_config_link() {
+  local target="$HOME/.config/starship.toml"
+  [[ -e "$target" || -L "$target" ]] || return 0
+
+  if starship_config_link_is_managed; then
+    run rm -- "$target"
+  else
+    warn "Leaving non-managed Starship config untouched: $target"
+  fi
+}
+
+tmux_theme_link_is_managed() {
+  local target="$HOME/.config/tmux/theme.conf"
+  [[ -L "$target" ]] || return 1
+
+  case "$(readlink -- "$target")" in
+    themes/ubuntu.conf | themes/fedora.conf) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+configure_tmux_theme() {
+  local variant config_dir source target link
+  variant="$(platform_config_variant)"
+  config_dir="$HOME/.config/tmux"
+  source="$config_dir/themes/$variant.conf"
+  target="$config_dir/theme.conf"
+  link="themes/$variant.conf"
+
+  [[ -e "$source" || "${DRY_RUN:-0}" == "1" ]] ||
+    die "tmux theme variant is missing: $source"
+
+  if same_target "$target" "$source"; then
+    info "tmux theme already selects $variant"
+    return 0
+  fi
+
+  if [[ -e "$target" || -L "$target" ]]; then
+    if tmux_theme_link_is_managed; then
+      run rm -- "$target"
+    else
+      backup_path "$target"
+    fi
+  fi
+
+  if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    print_command ln -s "$link" "$target"
+  else
+    mkdir -p "$config_dir"
+    ln -s "$link" "$target"
+  fi
+  info "Selected tmux theme: $variant"
+}
+
+remove_tmux_theme_link() {
+  local target="$HOME/.config/tmux/theme.conf"
+  [[ -e "$target" || -L "$target" ]] || return 0
+
+  if tmux_theme_link_is_managed; then
+    run rm -- "$target"
+  else
+    warn "Leaving non-managed tmux theme untouched: $target"
+  fi
+}
+
 deploy_modules() {
   ((${#STOW_MODULES[@]} > 0)) || return 0
 

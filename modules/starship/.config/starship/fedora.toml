@@ -1,0 +1,96 @@
+format = """
+[░▒▓](#4a557e)\
+[ ](bg:#4a557e fg:#51a2da)\
+$username\
+$hostname\
+[](bg:#93bef9 fg:#4a557e)\
+$directory\
+[](fg:#93bef9 bg:#1b293d)\
+$git_branch\
+$git_status\
+[](fg:#1b293d bg:#101a28)\
+$python\
+$nodejs\
+$rust\
+$golang\
+$php\
+[](fg:#101a28 bg:#000b1a)\
+$docker_context\
+$conda\
+[](fg:#000b1a)\
+\n$status$cmd_duration$character
+"""
+
+[username]
+show_always = true
+style_user = "bg:#4a557e fg:#f8f8f2"
+style_root = "bg:#4a557e fg:#ff5555"
+format = '[ $user@]($style)'
+
+[hostname]
+ssh_only = false
+style = "bg:#4a557e fg:#f8f8f2"
+format = '[$hostname ]($style)'
+trim_at = ".local"
+
+[directory]
+style = "fg:#f8f8f2 bg:#93bef9"
+format = "[ $path ]($style)"
+truncation_length = 3
+truncation_symbol = "…/"
+
+[git_branch]
+symbol = ""
+style = "bg:#1b293d"
+format = '[[ $symbol $branch ](fg:#93bef9 bg:#1b293d)]($style)'
+
+[git_status]
+style = "bg:#1b293d"
+format = '[[($all_status$ahead_behind )](fg:#93bef9 bg:#1b293d)]($style)'
+
+[python]
+symbol = ""
+style = "bg:#101a28"
+format = '[[ $symbol ($version)(\($virtualenv\)) ](fg:#93bef9 bg:#101a28)]($style)'
+
+[nodejs]
+symbol = ""
+style = "bg:#101a28"
+format = '[[ $symbol ($version) ](fg:#93bef9 bg:#101a28)]($style)'
+
+[rust]
+symbol = ""
+style = "bg:#101a28"
+format = '[[ $symbol ($version) ](fg:#93bef9 bg:#101a28)]($style)'
+
+[golang]
+symbol = ""
+style = "bg:#101a28"
+format = '[[ $symbol ($version) ](fg:#93bef9 bg:#101a28)]($style)'
+
+[php]
+symbol = ""
+style = "bg:#101a28"
+format = '[[ $symbol ($version) ](fg:#93bef9 bg:#101a28)]($style)'
+
+[docker_context]
+symbol = ""
+style = "bg:#000b1a"
+format = '[[ $symbol ($context) ](fg:#8be9fd bg:#000b1a)]($style)'
+
+[conda]
+style = "bg:#000b1a"
+format = '[[ $symbol ($environment) ](fg:#8be9fd bg:#000b1a)]($style)'
+
+[status]
+disabled = false
+format = '[exit $status ](bold red)'
+
+[cmd_duration]
+min_time = 2000
+format = '[took $duration ](yellow)'
+
+[character]
+disabled = false
+success_symbol = '[\$](fg:#f8f8f2)'
+error_symbol = '[\$](fg:#ff5555)'

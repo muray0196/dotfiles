@@ -53,7 +53,7 @@ def definition_lines(path: Path) -> list[str]:
 
 profiles = {path.name for path in (root / "profiles").iterdir() if path.is_file()}
 manifests = {path.name for path in (root / "manifests").iterdir() if path.is_file()}
-actions = {"mise-install", "sheldon-lock", "win32yank"}
+actions = {"mise-install", "sheldon-lock", "starship-config", "tmux-theme", "win32yank"}
 
 for name in sorted(profiles):
     for line in definition_lines(root / "profiles" / name):
@@ -168,6 +168,16 @@ assert_contains sheldon-lock "${ACTIONS[@]}"
 printf 'ok  zsh-abbr resolves Sheldon dependency\n'
 
 reset_resolution
+resolve_module starship
+assert_contains starship-config "${ACTIONS[@]}"
+printf 'ok  starship resolves install-time platform selection\n'
+
+reset_resolution
+resolve_module tmux
+assert_contains tmux-theme "${ACTIONS[@]}"
+printf 'ok  tmux resolves install-time platform selection\n'
+
+reset_resolution
 resolve_module nvim
 assert_contains brew-bootstrap "${NATIVE_GROUPS[@]}"
 assert_contains stow "${NATIVE_GROUPS[@]}"
@@ -252,6 +262,10 @@ for distro in ubuntu fedora; do
     grep -Fq 'stow --restow --no-folding' <<<"$output"
     grep -Fq 'brew bundle --no-upgrade' <<<"$output"
     grep -Fq 'nvim.Brewfile' <<<"$output"
+    grep -Fq "starship/$distro.toml" <<<"$output"
+    if [[ "$profile" != "shell" ]]; then
+      grep -Fq "themes/$distro.conf" <<<"$output"
+    fi
     if [[ "$distro" == "fedora" ]]; then
       grep -Fq 'sudo dnf group install -y development-tools' <<<"$output"
     fi
@@ -276,6 +290,19 @@ for distro in ubuntu fedora; do
   printf 'ok  %s/nvim module prerequisites\n' "$distro"
   rm -rf "$test_home"
 done
+
+test_home="$(mktemp -d)"
+fallback_variant="$(
+  HOME="$test_home" DOTFILES_ROOT="$ROOT" PLATFORM_ID=unknown bash <<'BASH'
+set -euo pipefail
+source "$DOTFILES_ROOT/lib/common.sh"
+source "$DOTFILES_ROOT/lib/deploy.sh"
+platform_config_variant
+BASH
+)"
+[[ "$fallback_variant" == "ubuntu" ]]
+printf 'ok  unknown Starship platform falls back to Ubuntu\n'
+rm -rf "$test_home"
 
 test_home="$(mktemp -d)"
 output="$(
@@ -411,6 +438,8 @@ if command -v stow >/dev/null 2>&1; then
     .zshrc \
     .zshprofile \
     .config/starship.toml \
+    .config/starship/ubuntu.toml \
+    .config/starship/fedora.toml \
     .config/sheldon/plugins.toml \
     .config/zsh-abbr/user-abbreviations \
     .config/nvim/init.lua \
@@ -421,9 +450,11 @@ if command -v stow >/dev/null 2>&1; then
       exit 1
     }
   done
+  [[ "$(readlink -- "$test_home/.config/starship.toml")" == "starship/ubuntu.toml" ]]
 
   grep -Fqx 'profile:shell' "$test_home/.local/state/dotfiles-linux/selection"
   grep -Fqx '.local/bin/dotfiles' "$test_home/.local/state/dotfiles-linux/managed-paths"
+  grep -Fqx '.config/starship.toml' "$test_home/.local/state/dotfiles-linux/managed-paths"
   status_output="$(HOME="$test_home" "$test_home/.local/bin/dotfiles" status)"
   grep -Fq 'Profile:    shell' <<<"$status_output"
   printf 'ok  installation selection and managed paths are recorded\n'
@@ -432,10 +463,36 @@ if command -v stow >/dev/null 2>&1; then
     "$ROOT/install.sh" --profile shell --unstow >/dev/null
   [[ ! -e "$test_home/.zshrc" && ! -L "$test_home/.zshrc" ]]
   [[ ! -e "$test_home/.config/starship.toml" && ! -L "$test_home/.config/starship.toml" ]]
+  [[ ! -e "$test_home/.config/starship/ubuntu.toml" &&
+    ! -L "$test_home/.config/starship/ubuntu.toml" ]]
+  [[ ! -e "$test_home/.config/starship/fedora.toml" &&
+    ! -L "$test_home/.config/starship/fedora.toml" ]]
   [[ ! -e "$test_home/.config/nvim/init.lua" && ! -L "$test_home/.config/nvim/init.lua" ]]
   backup="$(find "$test_home/.local/state/dotfiles-linux/backups" -type f -name .zshrc -print -quit)"
   grep -Fqx 'legacy-zshrc' "$backup"
   printf 'ok  apply, backup, link verification, and unstow\n'
+  rm -rf "$test_home"
+
+  test_home="$(mktemp -d)"
+  mkdir -p "$test_home/.config/tmux"
+  printf 'user-owned-starship\n' >"$test_home/.config/starship.toml"
+  printf 'user-owned-tmux-theme\n' >"$test_home/.config/tmux/theme.conf"
+  HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=fedora \
+    "$ROOT/install.sh" --module starship --module tmux --no-packages >/dev/null
+  [[ "$(readlink -- "$test_home/.config/starship.toml")" == "starship/fedora.toml" ]]
+  [[ "$(readlink -- "$test_home/.config/tmux/theme.conf")" == "themes/fedora.conf" ]]
+  starship_backup="$(find "$test_home/.local/state/dotfiles-linux/backups" -type f \
+    -path '*/.config/starship.toml' -print -quit)"
+  tmux_backup="$(find "$test_home/.local/state/dotfiles-linux/backups" -type f \
+    -path '*/.config/tmux/theme.conf' -print -quit)"
+  grep -Fqx 'user-owned-starship' "$starship_backup"
+  grep -Fqx 'user-owned-tmux-theme' "$tmux_backup"
+  HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=fedora \
+    "$ROOT/install.sh" --module starship --module tmux --unstow >/dev/null
+  [[ ! -e "$test_home/.config/starship.toml" && ! -L "$test_home/.config/starship.toml" ]]
+  [[ ! -e "$test_home/.config/tmux/theme.conf" &&
+    ! -L "$test_home/.config/tmux/theme.conf" ]]
+  printf 'ok  Fedora theme selection, conflict backup, and unstow\n'
   rm -rf "$test_home"
 
   printf '\n== Managed state and CLI ==\n'

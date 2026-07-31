@@ -130,6 +130,40 @@ check_stow_module() {
   done < <(find "$module_dir" \( -type f -o -type l \) -print0)
 }
 
+check_starship_selection() {
+  local variant="ubuntu"
+  [[ "$PLATFORM_ID" == "fedora" ]] && variant="fedora"
+
+  local target="$HOME/.config/starship.toml"
+  local expected="$HOME/.config/starship/$variant.toml"
+  local target_real expected_real
+  target_real="$(readlink -f -- "$target" 2>/dev/null || true)"
+  expected_real="$(readlink -f -- "$expected" 2>/dev/null || true)"
+
+  if [[ -n "$expected_real" && "$target_real" == "$expected_real" ]]; then
+    pass "Starship config selection: $variant"
+  else
+    fail "incorrect Starship config selection: expected $variant"
+  fi
+}
+
+check_tmux_theme_selection() {
+  local variant="ubuntu"
+  [[ "$PLATFORM_ID" == "fedora" ]] && variant="fedora"
+
+  local target="$HOME/.config/tmux/theme.conf"
+  local expected="$HOME/.config/tmux/themes/$variant.conf"
+  local target_real expected_real
+  target_real="$(readlink -f -- "$target" 2>/dev/null || true)"
+  expected_real="$(readlink -f -- "$expected" 2>/dev/null || true)"
+
+  if [[ -n "$expected_real" && "$target_real" == "$expected_real" ]]; then
+    pass "tmux theme selection: $variant"
+  else
+    fail "incorrect tmux theme selection: expected $variant"
+  fi
+}
+
 platform_label="$PLATFORM_ID $PLATFORM_VERSION"
 is_wsl && platform_label+=" (WSL)"
 printf 'Platform: %s\n' "$platform_label"
@@ -149,6 +183,13 @@ done
 for module in "${STOW_MODULES[@]}"; do
   check_stow_module "$module"
 done
+
+if array_contains starship-config "${ACTIONS[@]}"; then
+  check_starship_selection
+fi
+if array_contains tmux-theme "${ACTIONS[@]}"; then
+  check_tmux_theme_selection
+fi
 
 if command -v zsh >/dev/null 2>&1; then
   if zsh -n "$DOTFILES_ROOT/modules/zsh/.zshrc"; then
