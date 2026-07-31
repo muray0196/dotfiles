@@ -81,6 +81,9 @@ dotfiles cleanup --backups-older-than 30d
 # List profiles and modules
 ./install.sh --list
 
+# List modules with descriptions
+./install.sh --list-modules
+
 # Apply another profile
 dotfiles apply development
 

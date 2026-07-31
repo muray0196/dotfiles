@@ -25,6 +25,7 @@ NO_PACKAGES=0
 SET_SHELL=0
 UNSTOW=0
 SHOW_LIST=0
+SHOW_MODULES=0
 SHOW_PLAN=0
 
 usage() {
@@ -40,6 +41,7 @@ Options:
   --unstow            Remove managed symlinks; do not uninstall packages
   --plan              Print the resolved modules and package groups
   --list              List available profiles and modules
+  --list-modules      List available modules with descriptions
   -h, --help          Show this help
 
 Examples:
@@ -87,6 +89,10 @@ while (($# > 0)); do
       SHOW_LIST=1
       shift
       ;;
+    --list-modules)
+      SHOW_MODULES=1
+      shift
+      ;;
     -h | --help)
       usage
       exit 0
@@ -99,6 +105,11 @@ done
 
 if [[ "$SHOW_LIST" == "1" ]]; then
   list_configurations
+  exit 0
+fi
+
+if [[ "$SHOW_MODULES" == "1" ]]; then
+  list_modules
   exit 0
 fi
 

@@ -92,6 +92,42 @@ resolve_module() {
   MODULE_STATE[$name]="done"
 }
 
+manifest_description() {
+  local file="$1"
+  local line
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    [[ -n "$line" ]] || continue
+
+    if [[ "$line" == \#* ]]; then
+      line="$(trim "${line#\#}")"
+      [[ -n "$line" ]] && printf '%s\n' "$line"
+    fi
+    return 0
+  done <"$file"
+}
+
+list_modules() {
+  local file name description
+  local name_width=6
+
+  for file in "$DOTFILES_ROOT"/manifests/*; do
+    [[ -f "$file" ]] || continue
+    name="$(basename "$file")"
+    ((${#name} > name_width)) && name_width=${#name}
+  done
+
+  printf 'Modules:\n'
+  printf '  %-*s  %s\n' "$name_width" "MODULE" "DESCRIPTION"
+  for file in "$DOTFILES_ROOT"/manifests/*; do
+    [[ -f "$file" ]] || continue
+    name="$(basename "$file")"
+    description="$(manifest_description "$file")"
+    printf '  %-*s  %s\n' "$name_width" "$name" "${description:-(no description)}"
+  done
+}
+
 list_configurations() {
   local file
 
@@ -101,11 +137,8 @@ list_configurations() {
     printf '  %s\n' "$(basename "$file")"
   done
 
-  printf '\nModules:\n'
-  for file in "$DOTFILES_ROOT"/manifests/*; do
-    [[ -f "$file" ]] || continue
-    printf '  %s\n' "$(basename "$file")"
-  done
+  printf '\n'
+  list_modules
 }
 
 print_resolution() {

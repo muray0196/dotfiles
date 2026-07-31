@@ -217,6 +217,26 @@ done
 printf 'ok  development uses mise for Node.js and keeps its tools profile-only\n'
 BASH
 
+printf '\n== Installer listing ==\n'
+output="$("$ROOT/install.sh" --list-modules)"
+grep -Fq 'MODULE' <<<"$output"
+grep -Fq 'DESCRIPTION' <<<"$output"
+if grep -Fq 'Profiles:' <<<"$output"; then
+  printf '%s\n' '--list-modules must not include profiles' >&2
+  exit 1
+fi
+for manifest in "$ROOT"/manifests/*; do
+  module="$(basename "$manifest")"
+  description="$(sed -n '1s/^#[[:space:]]*//p' "$manifest")"
+  [[ -n "$description" ]] || {
+    printf 'module description is missing: %s\n' "$module" >&2
+    exit 1
+  }
+  module_line="$(grep -F "  $module" <<<"$output")"
+  grep -Fq "$description" <<<"$module_line"
+done
+printf 'ok  module list is generated from manifest descriptions\n'
+
 printf '\n== Installer dry-runs ==\n'
 for distro in ubuntu fedora; do
   for profile in shell server development; do
