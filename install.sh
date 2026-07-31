@@ -17,6 +17,8 @@ source "$DOTFILES_ROOT/lib/packages.sh"
 source "$DOTFILES_ROOT/lib/deploy.sh"
 # shellcheck source=lib/state.sh
 source "$DOTFILES_ROOT/lib/state.sh"
+# shellcheck source=lib/interactive.sh
+source "$DOTFILES_ROOT/lib/interactive.sh"
 
 PROFILE=""
 MODULE_ARGS=()
@@ -26,12 +28,17 @@ SET_SHELL=0
 UNSTOW=0
 SHOW_LIST=0
 SHOW_PLAN=0
+INTERACTIVE=0
+ORIGINAL_ARG_COUNT=$#
 
 usage() {
   cat <<'USAGE'
 Usage: ./install.sh [options]
 
+Running without options in a terminal starts the guided installer.
+
 Options:
+  --interactive       Start the guided installer explicitly
   --profile NAME      Install a profile (default: shell)
   --module NAME       Install one module; repeatable and combinable with --profile
   --dry-run           Show package, backup, link, and action operations
@@ -43,6 +50,7 @@ Options:
   -h, --help          Show this help
 
 Examples:
+  ./install.sh
   ./install.sh --profile server --dry-run
   ./install.sh --profile server --set-shell
   ./install.sh --profile wsl-development
@@ -52,6 +60,10 @@ USAGE
 
 while (($# > 0)); do
   case "$1" in
+    --interactive)
+      INTERACTIVE=1
+      shift
+      ;;
     --profile)
       (($# >= 2)) || die "--profile requires a value"
       [[ -z "$PROFILE" ]] || die "Only one --profile may be specified"
@@ -97,9 +109,23 @@ while (($# > 0)); do
   esac
 done
 
+if [[ "$INTERACTIVE" == "1" ]]; then
+  if [[ -n "$PROFILE" || ${#MODULE_ARGS[@]} -gt 0 || "$DRY_RUN" == "1" ||
+    "$NO_PACKAGES" == "1" || "$SET_SHELL" == "1" || "$UNSTOW" == "1" ||
+    "$SHOW_LIST" == "1" || "$SHOW_PLAN" == "1" ]]; then
+    die "--interactive cannot be combined with other options"
+  fi
+elif [[ "$ORIGINAL_ARG_COUNT" == "0" && -t 0 && -t 1 ]]; then
+  INTERACTIVE=1
+fi
+
 if [[ "$SHOW_LIST" == "1" ]]; then
   list_configurations
   exit 0
+fi
+
+if [[ "$INTERACTIVE" == "1" ]]; then
+  interactive_select_options
 fi
 
 if [[ -z "$PROFILE" && ${#MODULE_ARGS[@]} -eq 0 ]]; then
@@ -113,6 +139,10 @@ fi
 for module in "${MODULE_ARGS[@]}"; do
   resolve_module "$module"
 done
+
+if [[ "$INTERACTIVE" == "1" ]]; then
+  interactive_confirm
+fi
 
 if [[ "$SHOW_PLAN" == "1" ]]; then
   print_resolution

@@ -16,7 +16,7 @@ usage() {
 Usage: dotfiles COMMAND [options]
 
 Commands:
-  apply PROFILE [options]  Apply a profile through install.sh
+  apply [PROFILE] [options]  Apply a profile or start the guided installer
   update [options]         Pull, reconcile, update packages/plugins, and validate
   cleanup [options]        Remove stale links and clean selected package artifacts
   doctor [options]         Validate the saved selection
@@ -147,10 +147,13 @@ command_name="${1:-help}"
 
 case "$command_name" in
   apply)
-    (($# > 0)) || die "Usage: dotfiles apply PROFILE [install options]"
-    profile="$1"
-    shift
-    "$DOTFILES_ROOT/install.sh" --profile "$profile" "$@"
+    if (($# == 0)); then
+      "$DOTFILES_ROOT/install.sh" --interactive
+    else
+      profile="$1"
+      shift
+      "$DOTFILES_ROOT/install.sh" --profile "$profile" "$@"
+    fi
     ;;
   update) update_configuration "$@" ;;
   cleanup) "$DOTFILES_ROOT/cleanup.sh" "$@" ;;

@@ -217,6 +217,29 @@ done
 printf 'ok  development uses mise for Node.js and keeps its tools profile-only\n'
 BASH
 
+printf '\n== Interactive installer ==\n'
+output="$(printf '2\nn\nn\nn\n' | "$ROOT/install.sh" --interactive)"
+grep -Fq 'Select a profile:' <<<"$output"
+grep -Fq 'server' <<<"$output"
+grep -Fq 'Profile:           server' <<<"$output"
+grep -Fq 'Selected modules:' <<<"$output"
+grep -Fq 'Packages:          skip' <<<"$output"
+grep -Fq 'Login shell:       leave unchanged' <<<"$output"
+grep -Fq 'Installation cancelled; no changes were made' <<<"$output"
+
+if printf '1\n' | "$ROOT/install.sh" --interactive --dry-run >/dev/null 2>&1; then
+  printf '%s\n' '--interactive must reject other options' >&2
+  exit 1
+fi
+
+output="$(
+  printf '\nn\nn\nn\n' |
+    "$ROOT/modules/dotfiles-cli/.local/bin/dotfiles" apply
+)"
+grep -Fq 'Profile:           shell' <<<"$output"
+grep -Fq 'Installation cancelled; no changes were made' <<<"$output"
+printf 'ok  guided profile selection previews and confirms before applying\n'
+
 printf '\n== Installer dry-runs ==\n'
 for distro in ubuntu fedora; do
   for profile in shell server development; do

@@ -21,17 +21,21 @@ Choose a profile to build anything from a minimal shell setup to a full developm
 
 ## Installation
 
-Preview the planned operations first.
+Clone the repository and start the guided installer.
 
 ```bash
 git clone git@github.com:muray0196/dotfiles-linux.git ~/dotfiles-linux
 cd ~/dotfiles-linux
-./install.sh --profile server --dry-run --plan
+./install.sh
 ```
 
-Apply the profile after reviewing the plan.
+It asks which profile to install, whether to install packages, and whether to
+change the login shell. The resolved plan is shown before anything is changed.
+
+For a non-interactive installation, preview the planned operations first.
 
 ```bash
+./install.sh --profile server --dry-run --plan
 ./install.sh --profile server --set-shell
 ```
 
@@ -41,7 +45,8 @@ Use the WSL profile on WSL.
 ./install.sh --profile wsl-development --set-shell
 ```
 
-Running `./install.sh` without arguments is equivalent to using `--profile shell`.
+Without a terminal, running `./install.sh` without arguments remains equivalent
+to using `--profile shell`.
 The applied profile and managed links are recorded under `~/.local/state/dotfiles-linux/`.
 
 ## Routine operations
@@ -81,8 +86,9 @@ dotfiles cleanup --backups-older-than 30d
 # List profiles and modules
 ./install.sh --list
 
-# Apply another profile
+# Apply another profile, or omit it to use the guided installer
 dotfiles apply development
+dotfiles apply
 
 # Install individual modules
 ./install.sh --module tmux --module fastfetch
