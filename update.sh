@@ -24,8 +24,9 @@ usage() {
   cat <<'USAGE'
 Usage: ./update.sh [--profile NAME] [--module NAME ...] [--dry-run]
 
-Updates only Homebrew packages selected by the profile/module and Sheldon
-plugins. It deliberately does not run apt upgrade or dnf upgrade.
+Updates Homebrew packages selected by the profile/module, configured mise
+runtimes, and Sheldon plugins. It deliberately does not run apt upgrade or
+dnf upgrade.
 Without an explicit selection, the last successfully applied selection is used.
 USAGE
 }
@@ -69,6 +70,17 @@ done
 detect_platform
 update_brew_packages
 
+if array_contains dev-tools "${SELECTED_MODULES[@]}"; then
+  if [[ "$DRY_RUN" == "1" ]]; then
+    print_command mise upgrade node
+  elif command -v mise >/dev/null 2>&1 && mise which node >/dev/null 2>&1; then
+    info "Updating Node.js within the configured mise version range"
+    mise upgrade node
+  else
+    warn "Configured Node.js is unavailable; mise update was skipped"
+  fi
+fi
+
 if array_contains sheldon "${SELECTED_MODULES[@]}"; then
   if [[ "$DRY_RUN" == "1" ]]; then
     print_command sheldon lock --update
@@ -80,5 +92,5 @@ if array_contains sheldon "${SELECTED_MODULES[@]}"; then
   fi
 fi
 
-info "Managed user-space tools are up to date"
+info "Managed user-space tools and runtimes are up to date"
 info "Native OS packages were not upgraded"

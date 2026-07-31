@@ -53,7 +53,7 @@ def definition_lines(path: Path) -> list[str]:
 
 profiles = {path.name for path in (root / "profiles").iterdir() if path.is_file()}
 manifests = {path.name for path in (root / "manifests").iterdir() if path.is_file()}
-actions = {"sheldon-lock", "win32yank"}
+actions = {"mise-install", "sheldon-lock", "win32yank"}
 
 for name in sorted(profiles):
     for line in definition_lines(root / "profiles" / name):
@@ -148,6 +148,19 @@ for profile_file in "$DOTFILES_ROOT"/profiles/*; do
 done
 printf 'ok  every profile resolves the shared Linux baseline and Homebrew packages\n'
 
+for manifest in "$DOTFILES_ROOT"/manifests/*; do
+  module="$(basename "$manifest")"
+  reset_resolution
+  resolve_module "$module"
+  if ((${#BREW_GROUPS[@]} > 0)); then
+    assert_contains brew-bootstrap "${NATIVE_GROUPS[@]}"
+  fi
+  if ((${#STOW_MODULES[@]} > 0)); then
+    assert_contains stow "${NATIVE_GROUPS[@]}"
+  fi
+done
+printf 'ok  every Brew/Stow module resolves its native bootstrap group\n'
+
 reset_resolution
 resolve_module zsh-abbr
 assert_contains sheldon "${SELECTED_MODULES[@]}"
@@ -156,7 +169,8 @@ printf 'ok  zsh-abbr resolves Sheldon dependency\n'
 
 reset_resolution
 resolve_module nvim
-assert_contains base "${NATIVE_GROUPS[@]}"
+assert_contains brew-bootstrap "${NATIVE_GROUPS[@]}"
+assert_contains stow "${NATIVE_GROUPS[@]}"
 assert_not_contains development "${NATIVE_GROUPS[@]}"
 assert_contains nvim "${BREW_GROUPS[@]}"
 brew_formula_is_resolved neovim
@@ -164,7 +178,16 @@ if brew_formula_is_resolved stylua; then
   printf 'the nvim module must not resolve Stylua\n' >&2
   exit 1
 fi
-printf 'ok  nvim resolves baseline native prerequisites without development tools\n'
+printf 'ok  nvim resolves only Homebrew/Stow native prerequisites\n'
+
+reset_resolution
+resolve_module fastfetch
+assert_contains brew-bootstrap "${NATIVE_GROUPS[@]}"
+assert_contains stow "${NATIVE_GROUPS[@]}"
+for group in zsh git server development win32yank; do
+  assert_not_contains "$group" "${NATIVE_GROUPS[@]}"
+done
+printf 'ok  standalone fastfetch does not pull unrelated native groups\n'
 
 reset_resolution
 resolve_profile server
@@ -181,10 +204,17 @@ for profile in development wsl-development; do
   resolve_profile "$profile"
   assert_contains dev-tools "${SELECTED_MODULES[@]}"
   assert_contains dev-abbr "${SELECTED_MODULES[@]}"
+  assert_contains dev-tools "${STOW_MODULES[@]}"
+  assert_contains mise-install "${ACTIONS[@]}"
   brew_formula_is_resolved neovim
+  brew_formula_is_resolved mise
   brew_formula_is_resolved stylua
+  if brew_formula_is_resolved node; then
+    printf 'development must manage Node.js through mise, not Homebrew\n' >&2
+    exit 1
+  fi
 done
-printf 'ok  Stylua and development abbreviations remain development-only\n'
+printf 'ok  development uses mise for Node.js and keeps its tools profile-only\n'
 BASH
 
 printf '\n== Installer dry-runs ==\n'
@@ -197,8 +227,14 @@ for distro in ubuntu fedora; do
     )"
     grep -Fq '[dotfiles] Installation complete' <<<"$output"
     grep -Fq 'stow --restow --no-folding' <<<"$output"
-    grep -Fq 'brew bundle' <<<"$output"
+    grep -Fq 'brew bundle --no-upgrade' <<<"$output"
     grep -Fq 'nvim.Brewfile' <<<"$output"
+    if [[ "$distro" == "fedora" ]]; then
+      grep -Fq 'sudo dnf group install -y development-tools' <<<"$output"
+    fi
+    if [[ "$profile" == "development" ]]; then
+      grep -Fq 'mise install node' <<<"$output"
+    fi
     printf 'ok  %s/%s\n' "$distro" "$profile"
     rm -rf "$test_home"
   done
@@ -208,7 +244,7 @@ for distro in ubuntu fedora; do
     HOME="$test_home" DOTFILES_DISTRO_OVERRIDE="$distro" \
       "$ROOT/install.sh" --module nvim --dry-run --plan
   )"
-  grep -Fq 'Native groups:    base' <<<"$output"
+  grep -Fq 'Native groups:    brew-bootstrap stow' <<<"$output"
   grep -Fq 'nvim.Brewfile' <<<"$output"
   if grep -Fq 'development' <<<"$(grep -F 'Native groups:' <<<"$output")"; then
     printf 'direct nvim install must not resolve development native packages\n' >&2
@@ -227,7 +263,7 @@ if grep -Fq 'install-win32yank.sh' <<<"$output"; then
   printf 'win32yank must remain opt-in\n' >&2
   exit 1
 fi
-grep -Fq 'brew bundle' <<<"$output"
+grep -Fq 'brew bundle --no-upgrade' <<<"$output"
 printf 'ok  ubuntu/wsl-development (interop-safe default)\n'
 
 output="$(
@@ -235,6 +271,7 @@ output="$(
     "$ROOT/install.sh" --module win32yank --dry-run --plan
 )"
 grep -Fq 'install-win32yank.sh' <<<"$output"
+grep -Fq 'Native groups:    win32yank' <<<"$output"
 printf 'ok  explicit win32yank module\n'
 rm -rf "$test_home"
 
@@ -245,12 +282,13 @@ output="$(
     "$ROOT/update.sh" --profile development --dry-run
 )"
 grep -Fq 'brew bundle upgrade' <<<"$output"
+grep -Fq 'mise upgrade node' <<<"$output"
 grep -Fq 'sheldon lock --update' <<<"$output"
 if grep -Eq '(apt(-get)?|dnf)[[:space:]]+upgrade' <<<"$output"; then
   printf 'unexpected native OS upgrade in update output\n' >&2
   exit 1
 fi
-printf 'ok  selected Homebrew/Sheldon update only\n'
+printf 'ok  selected Homebrew/mise/Sheldon update only\n'
 rm -rf "$test_home"
 
 printf '\n== Conflict backup ==\n'
@@ -383,12 +421,15 @@ if command -v stow >/dev/null 2>&1; then
     "$ROOT/install.sh" --profile development --no-packages >/dev/null
   [[ -L "$test_home/.codex/config.toml" ]]
   [[ -L "$test_home/.config/zsh-abbr/extra/development.zsh" ]]
+  [[ -L "$test_home/.config/mise/config.toml" ]]
 
   HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
     "$ROOT/install.sh" --profile server --no-packages >/dev/null
   [[ ! -e "$test_home/.codex/config.toml" && ! -L "$test_home/.codex/config.toml" ]]
   [[ ! -e "$test_home/.config/zsh-abbr/extra/development.zsh" &&
     ! -L "$test_home/.config/zsh-abbr/extra/development.zsh" ]]
+  [[ ! -e "$test_home/.config/mise/config.toml" &&
+    ! -L "$test_home/.config/mise/config.toml" ]]
   grep -Fqx 'profile:server' "$test_home/.local/state/dotfiles-linux/selection"
   printf 'ok  applying a smaller profile removes stale managed links\n'
 
@@ -398,6 +439,7 @@ if command -v stow >/dev/null 2>&1; then
   )"
   grep -Fq 'Selected modules:' <<<"$output"
   grep -Fq 'brew bundle upgrade' <<<"$output"
+  grep -Fq 'mise upgrade node' <<<"$output"
   grep -Fq "$ROOT/doctor.sh" <<<"$output"
   printf 'ok  unified update uses the saved profile\n'
 

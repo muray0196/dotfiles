@@ -36,6 +36,8 @@ This file defines the operating rules for maintainers and coding agents working 
 - Put one module name or `profile:<name>` entry on each profile line.
 - Use only the existing `require:`, `native:`, `brew:`, `stow:`, and `action:` manifest directives.
 - When adding a module, add its manifest and every referenced package group, Stow directory, and action together.
+- Reference `native:brew-bootstrap` from every module that applies a Brewfile.
+- Reference `native:stow` from modules that deploy configuration directly, unless a required module already resolves it.
 - When adding a module to a profile, check its effect on every inheriting profile.
 - Treat Homebrew as installation infrastructure that is provisioned before applying Brewfiles, not as a Stow module.
 - Resolve dependencies required by standalone Neovim installation through the `nvim` module without implicitly adding development-only tools.
@@ -58,7 +60,8 @@ This file defines the operating rules for maintainers and coding agents working 
 
 - Manage Zsh, Git, Stow, tmux, and native dependencies with `apt` or `dnf`.
 - Manage Starship, Sheldon, Neovim, and additional user-facing CLI tools with Linuxbrew.
-- Keep `update.sh` limited to selected Homebrew packages and Sheldon plugins. Do not add `apt upgrade` or `dnf upgrade`.
+- Manage Node.js with mise and keep its global version declaration in the development Stow module.
+- Keep `update.sh` limited to selected Homebrew packages, mise runtimes, and Sheldon plugins. Do not add `apt upgrade` or `dnf upgrade`.
 - Never run `apt autoremove` or `dnf autoremove` from cleanup.
 - Do not mix system-wide upgrades, GitHub authentication, SSH key creation or registration, Docker installation, or systemd service activation into standard profile installation.
 - Isolate tasks with additional side effects under `scripts/` and require users to invoke them explicitly.

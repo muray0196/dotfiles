@@ -1,5 +1,6 @@
 # Sheldon plugin manager and plugin configuration.
-native:base
+native:brew-bootstrap
 brew:sheldon
+native:stow
 stow:sheldon
 action:sheldon-lock

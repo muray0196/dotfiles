@@ -1,3 +1,4 @@
 # Tmux configuration and native package.
 native:server
+native:stow
 stow:tmux

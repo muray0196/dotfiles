@@ -12,6 +12,11 @@ if (( ! $+commands[brew] )); then
 fi
 unset _brew
 
+# Development runtimes are optional and managed by mise.
+if (( $+commands[mise] )); then
+  eval "$(mise activate zsh)"
+fi
+
 # Completion.
 autoload -Uz compinit
 zmodload zsh/complist

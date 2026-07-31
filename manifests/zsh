@@ -1,3 +1,4 @@
 # Zsh and the common shell configuration.
-native:base
+native:zsh
+native:stow
 stow:zsh

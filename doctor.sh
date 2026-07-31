@@ -96,7 +96,12 @@ check_module_commands() {
     tmux) check_command tmux ;;
     fastfetch) check_command fastfetch ;;
     dev-tools)
-      check_command node
+      check_command mise
+      if command -v mise >/dev/null 2>&1 && mise which node >/dev/null 2>&1; then
+        pass "mise tool: node"
+      else
+        fail "missing mise tool: node"
+      fi
       check_command uv
       check_command stylua
       ;;

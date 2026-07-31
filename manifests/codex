@@ -1,2 +1,3 @@
 # Codex configuration. The Codex client itself is intentionally not installed here.
+native:stow
 stow:codex

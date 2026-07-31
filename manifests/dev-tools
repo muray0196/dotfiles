@@ -1,3 +1,7 @@
 # Language/runtime and GitHub development tools.
 native:development
+native:brew-bootstrap
 brew:dev-tools
+native:stow
+stow:dev-tools
+action:mise-install
