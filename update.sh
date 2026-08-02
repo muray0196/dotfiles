@@ -26,7 +26,7 @@ Usage: ./update.sh [--profile NAME] [--module NAME ...] [--dry-run]
 
 Updates Homebrew packages selected by the profile/module, configured mise
 runtimes, and Sheldon plugins. It deliberately does not run apt upgrade or
-dnf upgrade.
+pacman -Syu.
 Without an explicit selection, the last successfully applied selection is used.
 USAGE
 }

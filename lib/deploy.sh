@@ -80,7 +80,7 @@ backup_module_conflicts() {
 
 platform_config_variant() {
   case "${PLATFORM_ID:-}" in
-    fedora) printf 'fedora' ;;
+    arch) printf 'arch' ;;
     *) printf 'ubuntu' ;;
   esac
 }
@@ -92,7 +92,7 @@ starship_config_link_is_managed() {
   local link resolved legacy
   link="$(readlink -- "$target")"
   case "$link" in
-    starship/ubuntu.toml | starship/fedora.toml) return 0 ;;
+    starship/ubuntu.toml | starship/arch.toml) return 0 ;;
   esac
 
   if [[ "$link" == /* ]]; then
@@ -153,7 +153,7 @@ tmux_theme_link_is_managed() {
   [[ -L "$target" ]] || return 1
 
   case "$(readlink -- "$target")" in
-    themes/ubuntu.conf | themes/fedora.conf) return 0 ;;
+    themes/ubuntu.conf | themes/arch.conf) return 0 ;;
     *) return 1 ;;
   esac
 }

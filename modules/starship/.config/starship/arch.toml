@@ -1,6 +1,6 @@
 format = """
 [░▒▓](#4a557e)\
-[ ](bg:#4a557e fg:#51a2da)\
+[ ](bg:#4a557e fg:#51a2da)\
 $username\
 $hostname\
 [](bg:#93bef9 fg:#4a557e)\

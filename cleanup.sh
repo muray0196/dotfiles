@@ -30,7 +30,7 @@ Options:
   --profile NAME              Clean resources for a profile
   --module NAME               Include one module; repeatable
   --dry-run                   Show cleanup operations without applying them
-  --system-cache              Clean the apt or dnf package cache
+  --system-cache              Clean the apt or pacman package cache
   --backups-older-than AGE    Delete managed backups older than AGE (for example, 30d)
   -h, --help                  Show this help
 
@@ -97,7 +97,7 @@ if [[ "$SYSTEM_CACHE" == "1" ]]; then
   info "Cleaning the native package cache"
   case "$PLATFORM_ID" in
     ubuntu) run sudo apt-get clean ;;
-    fedora) run sudo dnf clean all ;;
+    arch) run sudo pacman -Sc --noconfirm ;;
   esac
 fi
 

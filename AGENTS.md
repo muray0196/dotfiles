@@ -5,7 +5,7 @@ This file defines the operating rules for maintainers and coding agents working 
 ## Purpose and scope
 
 - Treat this repository as the single source of truth for Linux dotfiles.
-- Support Ubuntu, Fedora, Ubuntu on WSL, and x86-64 Linux.
+- Support Ubuntu, Arch Linux, Ubuntu on WSL, and x86-64 Linux.
 - Do not assume support for macOS or other distributions unless it is added explicitly.
 - Do not install or enable persistent services through standard profiles.
 
@@ -23,7 +23,7 @@ This file defines the operating rules for maintainers and coding agents working 
 
 - `profiles/`: Define profile inheritance and module composition.
 - `manifests/`: Declare module dependencies, package groups, Stow targets, and actions.
-- `packages/native/`: Manage OS-level packages separately for Ubuntu and Fedora.
+- `packages/native/`: Manage OS-level packages separately for Ubuntu and Arch Linux.
 - `packages/brew/`: Manage user-facing CLI tools in module-specific Brewfiles.
 - `modules/`: Store feature-oriented GNU Stow packages relative to the home directory.
 - `lib/`: Store shared implementation used by install, update, cleanup, and doctor commands.
@@ -58,11 +58,11 @@ This file defines the operating rules for maintainers and coding agents working 
 
 ## Package and side-effect boundaries
 
-- Manage Zsh, Git, Stow, tmux, and native dependencies with `apt` or `dnf`.
+- Manage Zsh, Git, Stow, tmux, and native dependencies with `apt` or `pacman`.
 - Manage Starship, Sheldon, Neovim, and additional user-facing CLI tools with Linuxbrew.
 - Manage Node.js with mise and keep its global version declaration in the development Stow module.
-- Keep `update.sh` limited to selected Homebrew packages, mise runtimes, and Sheldon plugins. Do not add `apt upgrade` or `dnf upgrade`.
-- Never run `apt autoremove` or `dnf autoremove` from cleanup.
+- Keep `update.sh` limited to selected Homebrew packages, mise runtimes, and Sheldon plugins. Do not add `apt upgrade` or `pacman -Syu`.
+- Never run `apt autoremove` or automatic pacman orphan removal from cleanup.
 - Do not mix system-wide upgrades, GitHub authentication, SSH key creation or registration, Docker installation, or systemd service activation into standard profile installation.
 - Isolate tasks with additional side effects under `scripts/` and require users to invoke them explicitly.
 - Never delete conflicting files or legacy dotfiles symlinks. Preserve them under `~/.local/state/dotfiles-linux/backups/`.
@@ -74,7 +74,7 @@ This file defines the operating rules for maintainers and coding agents working 
 - Review resolved operations with `./install.sh --profile <name> --dry-run --plan` before applying them to a real environment.
 - Never run install or unstow against the real home directory while validating repository changes. Use dry-run mode or a temporary `HOME`.
 - Run `./tests/smoke.sh` after making changes.
-- At minimum, keep smoke coverage for shell syntax, TOML/JSON/Python syntax, profile-manifest-package-module-action references, all profile resolutions, Ubuntu/Fedora/WSL dry-runs, saved state, profile reconciliation, cleanup previews, and unified CLI uninstall.
+- At minimum, keep smoke coverage for shell syntax, TOML/JSON/Python syntax, profile-manifest-package-module-action references, all profile resolutions, Ubuntu/Arch/WSL dry-runs, saved state, profile reconciliation, cleanup previews, and unified CLI uninstall.
 - Resolve ShellCheck findings when changing shell scripts.
 - Follow `.editorconfig`: UTF-8, LF, a final newline, two-space indentation by default, and four-space indentation for Python. Follow `stylua.toml` for Lua.
 - If a test cannot be run, report the skipped test and the reason.

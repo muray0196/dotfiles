@@ -44,33 +44,13 @@ SOURCES
   sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 }
 
-install_fedora() {
-  local conflicts=(
-    docker docker-client docker-client-latest docker-common docker-latest
-    docker-latest-logrotate docker-logrotate docker-selinux
-    docker-engine-selinux docker-engine
-  )
-  local installed=()
-  local package
-  for package in "${conflicts[@]}"; do
-    rpm -q "$package" >/dev/null 2>&1 && installed+=("$package")
-  done
-  ((${#installed[@]} == 0)) || sudo dnf remove -y "${installed[@]}"
-
-  sudo dnf install -y dnf-plugins-core
-  if [[ ! -f /etc/yum.repos.d/docker-ce.repo ]]; then
-    if dnf config-manager addrepo --help >/dev/null 2>&1; then
-      sudo dnf config-manager addrepo --from-repofile https://download.docker.com/linux/fedora/docker-ce.repo
-    else
-      sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
-    fi
-  fi
-  sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+install_arch() {
+  sudo pacman -S --needed --noconfirm docker docker-buildx docker-compose
 }
 
 case "$PLATFORM_ID" in
   ubuntu) install_ubuntu ;;
-  fedora) install_fedora ;;
+  arch) install_arch ;;
 esac
 
 sudo systemctl enable --now docker

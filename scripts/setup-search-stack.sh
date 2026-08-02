@@ -21,8 +21,8 @@ if ! command -v openssl >/dev/null 2>&1; then
       sudo apt-get update
       sudo apt-get install -y openssl
       ;;
-    fedora)
-      sudo dnf install -y openssl
+    arch)
+      sudo pacman -S --needed --noconfirm openssl
       ;;
   esac
 fi

@@ -1,12 +1,12 @@
 # dotfiles
 
-Linux dotfiles shared across Ubuntu, Fedora, and WSL.
+Linux dotfiles shared across Ubuntu, Arch Linux, and WSL.
 Choose a profile to build anything from a minimal shell setup to a full development environment.
 
 ## Supported environments
 
 - Ubuntu
-- Fedora
+- Arch Linux
 - Ubuntu on WSL
 - x86-64 Linux
 
@@ -49,8 +49,8 @@ Without a terminal, running `./install.sh` without arguments remains equivalent
 to using `--profile shell`.
 The applied profile and managed links are recorded under `~/.local/state/dotfiles-linux/`.
 
-Starship and tmux keep Ubuntu and Fedora color variants under `~/.config/`.
-During installation or profile reapplication, Fedora selects the Fedora
+Starship and tmux keep Ubuntu and Arch Linux color variants under `~/.config/`.
+During installation or profile reapplication, Arch Linux selects the Arch
 variants; Ubuntu and the selector fallback use the Ubuntu variants. The active
 files are linked at `~/.config/starship.toml` and `~/.config/tmux/theme.conf`.
 
@@ -78,7 +78,7 @@ dotfiles doctor
 ```
 
 `dotfiles update` requires a clean repository and uses `git pull --ff-only` before reconciling the saved selection.
-`dotfiles cleanup` never runs `apt autoremove` or `dnf autoremove`, and it does not delete backups by default.
+`dotfiles cleanup` never runs `apt autoremove` or automatic pacman orphan removal, and it does not delete backups by default.
 Backup pruning must be requested explicitly:
 
 ```bash
@@ -114,24 +114,24 @@ Additional setup for GitHub authentication, Docker, SearXNG, and similar tools m
 
 ## Package ownership
 
-System integration and Homebrew prerequisites are installed with `apt` or `dnf`.
+System integration and Homebrew prerequisites are installed with `apt` or `pacman`.
 User-facing CLI tools are installed with Homebrew, while language runtimes are managed by mise.
 
 | Owner | Packages |
 |---|---|
-| `apt` / `dnf` | Zsh, Git, Stow, tmux, OpenSSH, Python, and Homebrew build prerequisites |
+| `apt` / `pacman` | Zsh, Git, Stow, tmux, OpenSSH, Python, and Homebrew build prerequisites |
 | Homebrew | Starship, Sheldon, Neovim, fzf, ripgrep, fastfetch, uv, Stylua, gh, and mise |
 | mise | Node.js 24 |
 
 Normal profile application uses `brew bundle --no-upgrade`; Homebrew and mise upgrades remain explicit through `dotfiles update`.
-The Fedora Homebrew bootstrap installs the official `development-tools` package group.
+The Arch Linux Homebrew bootstrap installs the `base-devel` package.
 
 ## Repository layout
 
 ```text
 profiles/   Profile definitions
 manifests/  Module dependencies and installation definitions
-packages/   apt, dnf, and Homebrew package definitions
+packages/   apt, pacman, and Homebrew package definitions
 modules/    Configuration deployed with GNU Stow
 lib/        Shared installer, state, and cleanup implementation
 scripts/    Explicit additional setup tasks
