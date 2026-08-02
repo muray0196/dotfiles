@@ -132,7 +132,7 @@ check_stow_module() {
 
 check_starship_selection() {
   local variant="ubuntu"
-  [[ "$PLATFORM_ID" == "fedora" ]] && variant="fedora"
+  [[ "$PLATFORM_ID" == "arch" ]] && variant="arch"
 
   local target="$HOME/.config/starship.toml"
   local expected="$HOME/.config/starship/$variant.toml"
@@ -149,7 +149,7 @@ check_starship_selection() {
 
 check_tmux_theme_selection() {
   local variant="ubuntu"
-  [[ "$PLATFORM_ID" == "fedora" ]] && variant="fedora"
+  [[ "$PLATFORM_ID" == "arch" ]] && variant="arch"
 
   local target="$HOME/.config/tmux/theme.conf"
   local expected="$HOME/.config/tmux/themes/$variant.conf"

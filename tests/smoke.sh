@@ -70,7 +70,7 @@ for name in sorted(manifests):
         if kind == "require":
             assert value in manifests, f"unknown module dependency: {name} -> {value}"
         elif kind == "native":
-            for distro in ("ubuntu", "fedora"):
+            for distro in ("ubuntu", "arch"):
                 path = root / "packages" / "native" / distro / f"{value}.txt"
                 assert path.is_file(), f"missing native group: {distro}/{value}"
         elif kind == "brew":
@@ -251,7 +251,7 @@ grep -Fq 'Installation cancelled; no changes were made' <<<"$output"
 printf 'ok  guided profile selection previews and confirms before applying\n'
 
 printf '\n== Installer dry-runs ==\n'
-for distro in ubuntu fedora; do
+for distro in ubuntu arch; do
   for profile in shell server development; do
     test_home="$(mktemp -d)"
     output="$(
@@ -266,8 +266,8 @@ for distro in ubuntu fedora; do
     if [[ "$profile" != "shell" ]]; then
       grep -Fq "themes/$distro.conf" <<<"$output"
     fi
-    if [[ "$distro" == "fedora" ]]; then
-      grep -Fq 'sudo dnf group install -y development-tools' <<<"$output"
+    if [[ "$distro" == "arch" ]]; then
+      grep -Fq 'sudo pacman -S --needed --noconfirm' <<<"$output"
     fi
     if [[ "$profile" == "development" ]]; then
       grep -Fq 'mise install node' <<<"$output"
@@ -334,7 +334,7 @@ output="$(
 grep -Fq 'brew bundle upgrade' <<<"$output"
 grep -Fq 'mise upgrade node' <<<"$output"
 grep -Fq 'sheldon lock --update' <<<"$output"
-if grep -Eq '(apt(-get)?|dnf)[[:space:]]+upgrade' <<<"$output"; then
+if grep -Eq 'apt(-get)?[[:space:]]+upgrade|pacman[[:space:]].*-Syu' <<<"$output"; then
   printf 'unexpected native OS upgrade in update output\n' >&2
   exit 1
 fi
@@ -439,7 +439,7 @@ if command -v stow >/dev/null 2>&1; then
     .zshprofile \
     .config/starship.toml \
     .config/starship/ubuntu.toml \
-    .config/starship/fedora.toml \
+    .config/starship/arch.toml \
     .config/sheldon/plugins.toml \
     .config/zsh-abbr/user-abbreviations \
     .config/nvim/init.lua \
@@ -465,8 +465,8 @@ if command -v stow >/dev/null 2>&1; then
   [[ ! -e "$test_home/.config/starship.toml" && ! -L "$test_home/.config/starship.toml" ]]
   [[ ! -e "$test_home/.config/starship/ubuntu.toml" &&
     ! -L "$test_home/.config/starship/ubuntu.toml" ]]
-  [[ ! -e "$test_home/.config/starship/fedora.toml" &&
-    ! -L "$test_home/.config/starship/fedora.toml" ]]
+  [[ ! -e "$test_home/.config/starship/arch.toml" &&
+    ! -L "$test_home/.config/starship/arch.toml" ]]
   [[ ! -e "$test_home/.config/nvim/init.lua" && ! -L "$test_home/.config/nvim/init.lua" ]]
   backup="$(find "$test_home/.local/state/dotfiles-linux/backups" -type f -name .zshrc -print -quit)"
   grep -Fqx 'legacy-zshrc' "$backup"
@@ -477,22 +477,22 @@ if command -v stow >/dev/null 2>&1; then
   mkdir -p "$test_home/.config/tmux"
   printf 'user-owned-starship\n' >"$test_home/.config/starship.toml"
   printf 'user-owned-tmux-theme\n' >"$test_home/.config/tmux/theme.conf"
-  HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=fedora \
+  HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=arch \
     "$ROOT/install.sh" --module starship --module tmux --no-packages >/dev/null
-  [[ "$(readlink -- "$test_home/.config/starship.toml")" == "starship/fedora.toml" ]]
-  [[ "$(readlink -- "$test_home/.config/tmux/theme.conf")" == "themes/fedora.conf" ]]
+  [[ "$(readlink -- "$test_home/.config/starship.toml")" == "starship/arch.toml" ]]
+  [[ "$(readlink -- "$test_home/.config/tmux/theme.conf")" == "themes/arch.conf" ]]
   starship_backup="$(find "$test_home/.local/state/dotfiles-linux/backups" -type f \
     -path '*/.config/starship.toml' -print -quit)"
   tmux_backup="$(find "$test_home/.local/state/dotfiles-linux/backups" -type f \
     -path '*/.config/tmux/theme.conf' -print -quit)"
   grep -Fqx 'user-owned-starship' "$starship_backup"
   grep -Fqx 'user-owned-tmux-theme' "$tmux_backup"
-  HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=fedora \
+  HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=arch \
     "$ROOT/install.sh" --module starship --module tmux --unstow >/dev/null
   [[ ! -e "$test_home/.config/starship.toml" && ! -L "$test_home/.config/starship.toml" ]]
   [[ ! -e "$test_home/.config/tmux/theme.conf" &&
     ! -L "$test_home/.config/tmux/theme.conf" ]]
-  printf 'ok  Fedora theme selection, conflict backup, and unstow\n'
+  printf 'ok  Arch Linux theme selection, conflict backup, and unstow\n'
   rm -rf "$test_home"
 
   printf '\n== Managed state and CLI ==\n'

@@ -22,8 +22,8 @@ detect_platform() {
   fi
 
   case "$PLATFORM_ID" in
-    ubuntu | fedora) ;;
-    *) die "Unsupported distribution: ${PLATFORM_ID:-unknown}. Supported: Ubuntu, Fedora" ;;
+    ubuntu | arch) ;;
+    *) die "Unsupported distribution: ${PLATFORM_ID:-unknown}. Supported: Ubuntu, Arch Linux" ;;
   esac
 
   if [[ -n "${WSL_DISTRO_NAME:-}" ]] ||

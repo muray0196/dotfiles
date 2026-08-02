@@ -27,11 +27,8 @@ install_native_packages() {
       run sudo apt-get update
       run sudo apt-get install -y "${packages[@]}"
       ;;
-    fedora)
-      if array_contains brew-bootstrap "${NATIVE_GROUPS[@]}"; then
-        run sudo dnf group install -y development-tools
-      fi
-      run sudo dnf install -y "${packages[@]}"
+    arch)
+      run sudo pacman -S --needed --noconfirm "${packages[@]}"
       ;;
   esac
 }
