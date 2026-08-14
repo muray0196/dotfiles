@@ -83,10 +83,11 @@ style = "bg:#000b1a"
 format = '[[ $symbol ($environment) ](fg:#8be9fd bg:#000b1a)]($style)'
 
 [status]
-disabled = false
+disabled = true
 format = '[exit $status ](bold red)'
 
 [cmd_duration]
+disabled = true
 min_time = 2000
 format = '[took $duration ](yellow)'
 
