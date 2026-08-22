@@ -135,10 +135,6 @@ Scope {
         }
     }
 
-    function percent(value, available) {
-        return available ? value.toFixed(0) + "%" : "--%";
-    }
-
     function compactModelName(value) {
         if (typeof value !== "string")
             return "";
@@ -345,15 +341,6 @@ Scope {
                 }
             }
 
-            Text {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: shell.percent(usage, available)
-                color: "#f5f7ff"
-                font.family: "Adwaita Sans"
-                font.pixelSize: 23
-                font.weight: Font.Medium
-            }
         }
 
         Text {
@@ -430,8 +417,7 @@ Scope {
             Text {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                text: shell.memoryAmount(used, total, available) + "  "
-                    + shell.percent(usage, available)
+                text: shell.memoryAmount(used, total, available)
                 color: "#f5f7ff"
                 font.family: "Adwaita Sans"
                 font.pixelSize: 14
@@ -488,9 +474,6 @@ Scope {
                     ? shell.storageAmount(
                         storageVolumeSection.used,
                         storageVolumeSection.total,
-                        true
-                    ) + "  " + shell.percent(
-                        storageVolumeSection.usage,
                         true
                     )
                     : "NOT MOUNTED"
@@ -561,17 +544,11 @@ Scope {
             }
 
             Text {
+                visible: compactGpuSection.sleeping
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                text: compactGpuSection.sleeping
-                    ? "SLEEP"
-                    : shell.percent(
-                        compactGpuSection.gpuAvailable
-                            ? compactGpuSection.gpu.usage : 0,
-                        compactGpuSection.gpuAvailable
-                    )
-                color: compactGpuSection.sleeping
-                    ? "#8b8e99" : "#f5f7ff"
+                text: "SLEEP"
+                color: "#8b8e99"
                 font.family: "Adwaita Sans"
                 font.pixelSize: 18
                 font.weight: Font.Medium
@@ -618,10 +595,6 @@ Scope {
                         ? compactGpuSection.gpu.vram.used : 0,
                     compactGpuSection.vramAvailable
                         ? compactGpuSection.gpu.vram.total : 0,
-                    compactGpuSection.vramAvailable
-                ) + "  " + shell.percent(
-                    compactGpuSection.vramAvailable
-                        ? compactGpuSection.gpu.vram.usage : 0,
                     compactGpuSection.vramAvailable
                 )
                 color: "#f5f7ff"
