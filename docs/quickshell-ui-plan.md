@@ -24,6 +24,8 @@ groups, not from their different content.
   square status indicators.
 - Current fonts, Material Symbols icons, per-metric colors, content order, and
   behavior.
+- Vertically center icons, labels, badges, and values within mixed-size rows;
+  do not rely on the row positioner's default top alignment.
 - Compact, legible information hierarchy with accurate status semantics.
 
 This baseline is the rollback point before further design experiments.

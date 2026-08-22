@@ -340,6 +340,7 @@ Scope {
             spacing: 5
 
             Text {
+                anchors.verticalCenter: parent.verticalCenter
                 text: symbol
                 color: "#c7cad5"
                 font.family: "Material Symbols Rounded"
@@ -347,6 +348,7 @@ Scope {
             }
 
             Text {
+                anchors.verticalCenter: parent.verticalCenter
                 text: value
                 color: "#f5f7ff"
                 font.family: shell.numericFont
@@ -377,6 +379,7 @@ Scope {
                 spacing: 7
 
                 Text {
+                    anchors.verticalCenter: parent.verticalCenter
                     text: symbol
                     color: accent
                     font.family: "Material Symbols Rounded"
@@ -384,6 +387,7 @@ Scope {
                 }
 
                 Text {
+                    anchors.verticalCenter: parent.verticalCenter
                     text: label
                     color: "#f5f7ff"
                     font.family: "Adwaita Sans"
@@ -450,6 +454,7 @@ Scope {
                 spacing: 7
 
                 Text {
+                    anchors.verticalCenter: parent.verticalCenter
                     text: symbol
                     color: accent
                     font.family: "Material Symbols Rounded"
@@ -457,6 +462,7 @@ Scope {
                 }
 
                 Text {
+                    anchors.verticalCenter: parent.verticalCenter
                     text: label
                     color: "#f5f7ff"
                     font.family: "Adwaita Sans"
@@ -503,6 +509,7 @@ Scope {
                 spacing: 7
 
                 Text {
+                    anchors.verticalCenter: parent.verticalCenter
                     text: "\ue1db"
                     color: "#e0af68"
                     font.family: "Material Symbols Rounded"
@@ -510,6 +517,7 @@ Scope {
                 }
 
                 Text {
+                    anchors.verticalCenter: parent.verticalCenter
                     text: storageVolumeSection.label
                     color: "#f5f7ff"
                     font.family: "Adwaita Sans"
@@ -568,6 +576,7 @@ Scope {
                 spacing: 7
 
                 Text {
+                    anchors.verticalCenter: parent.verticalCenter
                     text: "\ue30d"
                     color: "#c099ff"
                     font.family: "Material Symbols Rounded"
@@ -575,6 +584,7 @@ Scope {
                 }
 
                 Text {
+                    anchors.verticalCenter: parent.verticalCenter
                     text: "GPU " + compactGpuSection.deviceNumber
                     color: "#f5f7ff"
                     font.family: "Adwaita Sans"
@@ -583,6 +593,7 @@ Scope {
                 }
 
                 Text {
+                    anchors.verticalCenter: parent.verticalCenter
                     visible: compactGpuSection.gpu
                         && compactGpuSection.gpu.displayConnected === true
                     text: "DISPLAY"
