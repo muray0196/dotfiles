@@ -14,6 +14,13 @@ Scope {
         Quickshell.shellDir + "/automation.json"
     readonly property string machineConfigPath:
         Quickshell.shellDir + "/machine.json"
+    readonly property color panelBackground: "#b5181822"
+    readonly property color panelEdgeLight: "#8a717683"
+    readonly property color panelEdgeDark: "#8a30333d"
+    readonly property color dividerColor: "#665c606b"
+    readonly property int panelContentWidth: 280
+    readonly property int panelTitleSize: 18
+    readonly property int cardSectionSpacing: 10
 
     function updateMetrics(target, line) {
         try {
@@ -251,6 +258,48 @@ Scope {
 
         function toggle(): void {
             shell.widgetsVisible = !shell.widgetsVisible;
+        }
+    }
+
+    component PanelEdge: Item {
+        Rectangle {
+            anchors {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+            }
+            height: 1
+            color: shell.panelEdgeLight
+        }
+
+        Rectangle {
+            anchors {
+                top: parent.top
+                bottom: parent.bottom
+                left: parent.left
+            }
+            width: 1
+            color: shell.panelEdgeLight
+        }
+
+        Rectangle {
+            anchors {
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+            }
+            height: 1
+            color: shell.panelEdgeDark
+        }
+
+        Rectangle {
+            anchors {
+                top: parent.top
+                right: parent.right
+                bottom: parent.bottom
+            }
+            width: 1
+            color: shell.panelEdgeDark
         }
     }
 
@@ -658,7 +707,7 @@ Scope {
         readonly property int deviceCount: Array.isArray(gpus)
             ? gpus.length : 0
 
-        spacing: 8
+        spacing: 7
 
         Item {
             width: parent.width
@@ -753,15 +802,14 @@ Scope {
         implicitWidth: 312
         implicitHeight: cardContent.implicitHeight + 28
         radius: 0
-        color: "#b5181822"
-        border.width: 1
-        border.color: "#805c606b"
+        color: shell.panelBackground
+        border.width: 0
 
         Column {
             id: cardContent
             anchors.centerIn: parent
-            width: 280
-            spacing: 11
+            width: shell.panelContentWidth
+            spacing: shell.cardSectionSpacing
 
             Item {
                 width: parent.width
@@ -777,7 +825,7 @@ Scope {
                         text: deviceName
                         color: "#f5f7ff"
                         font.family: "Noto Sans JP"
-                        font.pixelSize: 19
+                        font.pixelSize: shell.panelTitleSize
                         font.weight: Font.Medium
                     }
 
@@ -785,7 +833,7 @@ Scope {
                         text: platform
                         color: "#f5f7ff"
                         font.family: "Adwaita Sans"
-                        font.pixelSize: 12
+                        font.pixelSize: 11
                         font.weight: Font.Medium
                         font.letterSpacing: 0.8
                     }
@@ -852,6 +900,11 @@ Scope {
                 accent: "#ff9e64"
             }
         }
+
+        PanelEdge {
+            anchors.fill: parent
+            z: 10
+        }
     }
 
     component SystemSummarySection: Column {
@@ -868,7 +921,7 @@ Scope {
 
         Item {
             width: parent.width
-            height: 33
+            height: 37
 
             Column {
                 anchors.left: parent.left
@@ -879,7 +932,7 @@ Scope {
                     text: title
                     color: "#f5f7ff"
                     font.family: "Adwaita Sans"
-                    font.pixelSize: 12
+                    font.pixelSize: shell.panelTitleSize
                     font.weight: Font.Medium
                     font.letterSpacing: 0.9
                 }
@@ -982,16 +1035,15 @@ Scope {
         implicitWidth: 312
         implicitHeight: localSystemContent.implicitHeight + 28
         radius: 0
-        color: "#b5181822"
-        border.width: 1
-        border.color: "#805c606b"
+        color: shell.panelBackground
+        border.width: 0
 
         Column {
             id: localSystemContent
 
             anchors.centerIn: parent
-            width: 280
-            spacing: 11
+            width: shell.panelContentWidth
+            spacing: shell.cardSectionSpacing
 
             SystemSummarySection {
                 width: parent.width
@@ -1003,7 +1055,7 @@ Scope {
             Rectangle {
                 width: parent.width
                 height: 1
-                color: "#805c606b"
+                color: shell.dividerColor
             }
 
             ComputeSection {
@@ -1033,6 +1085,11 @@ Scope {
                 width: parent.width
                 gpus: localSystemCard.metrics.gpus
             }
+        }
+
+        PanelEdge {
+            anchors.fill: parent
+            z: 10
         }
     }
 

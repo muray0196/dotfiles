@@ -9,6 +9,14 @@ Scope {
     property bool widgetsVisible: true
     readonly property string clockScriptsDir: Quickshell.shellDir + "/scripts"
     readonly property string clockConfigPath: Quickshell.shellDir + "/local.json"
+    readonly property color panelBackground: "#b5181822"
+    readonly property color panelEdgeLight: "#8a717683"
+    readonly property color panelEdgeDark: "#8a30333d"
+    readonly property color dividerColor: "#665c606b"
+    readonly property int panelContentWidth: 280
+    readonly property int panelTitleSize: 18
+    readonly property int panelMetaSize: 11
+    readonly property int panelGap: 10
     property var weekdayNames: ["日", "月", "火", "水", "木", "金", "土"]
     property var holidayEntries: ({})
     property bool holidayDataAvailable: false
@@ -756,6 +764,48 @@ Scope {
         }
     }
 
+    component PanelEdge: Item {
+        Rectangle {
+            anchors {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+            }
+            height: 1
+            color: shell.panelEdgeLight
+        }
+
+        Rectangle {
+            anchors {
+                top: parent.top
+                bottom: parent.bottom
+                left: parent.left
+            }
+            width: 1
+            color: shell.panelEdgeLight
+        }
+
+        Rectangle {
+            anchors {
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+            }
+            height: 1
+            color: shell.panelEdgeDark
+        }
+
+        Rectangle {
+            anchors {
+                top: parent.top
+                right: parent.right
+                bottom: parent.bottom
+            }
+            width: 1
+            color: shell.panelEdgeDark
+        }
+    }
+
     PanelWindow {
         id: clockWindow
         visible: shell.widgetsVisible
@@ -779,9 +829,12 @@ Scope {
         Rectangle {
             anchors.fill: parent
             radius: 0
-            color: "#b5181822"
-            border.width: 1
-            border.color: "#805c606b"
+            color: shell.panelBackground
+            border.width: 0
+
+            PanelEdge {
+                anchors.fill: parent
+            }
 
             Column {
                 id: clockContent
@@ -883,7 +936,8 @@ Scope {
         }
 
         margins {
-            top: clockWindow.margins.top + clockWindow.implicitHeight + 10
+            top: clockWindow.margins.top + clockWindow.implicitHeight
+                + shell.panelGap
             right: 12
         }
 
@@ -896,14 +950,17 @@ Scope {
         Rectangle {
             anchors.fill: parent
             radius: 0
-            color: "#b5181822"
-            border.width: 1
-            border.color: "#805c606b"
+            color: shell.panelBackground
+            border.width: 0
+
+            PanelEdge {
+                anchors.fill: parent
+            }
 
             Column {
                 id: calendarContent
                 anchors.centerIn: parent
-                width: 280
+                width: shell.panelContentWidth
                 spacing: 4
 
                 Text {
@@ -912,7 +969,7 @@ Scope {
                     text: shell.currentYear + "年" + shell.currentMonth + "月"
                     color: "#f5f7ff"
                     font.family: "Noto Sans JP"
-                    font.pixelSize: 20
+                    font.pixelSize: shell.panelTitleSize
                     font.weight: Font.Medium
                 }
 
@@ -942,7 +999,7 @@ Scope {
                 Rectangle {
                     width: parent.width
                     height: 1
-                    color: "#40f5f7ff"
+                    color: shell.dividerColor
                 }
 
                 Grid {
@@ -1011,7 +1068,8 @@ Scope {
         }
 
         margins {
-            top: calendarWindow.margins.top + calendarWindow.implicitHeight + 10
+            top: calendarWindow.margins.top + calendarWindow.implicitHeight
+                + shell.panelGap
             right: 12
         }
 
@@ -1024,14 +1082,17 @@ Scope {
         Rectangle {
             anchors.fill: parent
             radius: 0
-            color: "#b5181822"
-            border.width: 1
-            border.color: "#805c606b"
+            color: shell.panelBackground
+            border.width: 0
+
+            PanelEdge {
+                anchors.fill: parent
+            }
 
             Column {
                 id: weatherContent
                 anchors.centerIn: parent
-                width: 280
+                width: shell.panelContentWidth
                 spacing: 3
 
                 Text {
@@ -1041,7 +1102,7 @@ Scope {
                     text: "室内"
                     color: "#f5f7ff"
                     font.family: "Noto Sans JP"
-                    font.pixelSize: 20
+                    font.pixelSize: shell.panelTitleSize
                     font.weight: Font.Medium
                 }
 
@@ -1102,7 +1163,7 @@ Scope {
                         anchors.centerIn: parent
                         width: parent.width
                         height: 1
-                        color: "#55f5f7ff"
+                        color: shell.dividerColor
                     }
                 }
 
@@ -1122,7 +1183,7 @@ Scope {
                         text: "屋外"
                         color: "#f5f7ff"
                         font.family: "Noto Sans JP"
-                        font.pixelSize: 20
+                        font.pixelSize: shell.panelTitleSize
                         font.weight: Font.Medium
                     }
 
@@ -1136,7 +1197,7 @@ Scope {
                         text: shell.weatherObservedAt + "観測"
                         color: "#aeb3c2"
                         font.family: "Noto Sans JP"
-                        font.pixelSize: 12
+                        font.pixelSize: shell.panelMetaSize
                         font.weight: Font.Normal
                     }
                 }
@@ -1192,7 +1253,7 @@ Scope {
                             anchors.centerIn: parent
                             width: parent.width
                             height: 1
-                            color: "#55f5f7ff"
+                            color: shell.dividerColor
                         }
                     }
 
@@ -1237,7 +1298,7 @@ Scope {
                                     Rectangle {
                                         width: parent.width
                                         height: 1
-                                        color: "#55f5f7ff"
+                                        color: shell.dividerColor
                                     }
 
                                     Text {
@@ -1254,7 +1315,7 @@ Scope {
                                     Rectangle {
                                         width: parent.width
                                         height: 1
-                                        color: "#55f5f7ff"
+                                        color: shell.dividerColor
                                     }
 
                                     Text {
@@ -1275,7 +1336,7 @@ Scope {
                                     }
                                     visible: index < shell.hourlyForecast.length - 1
                                     width: 1
-                                    color: "#55f5f7ff"
+                                    color: shell.dividerColor
                                 }
                             }
                         }
@@ -1320,14 +1381,17 @@ Scope {
         Rectangle {
             anchors.fill: parent
             radius: 0
-            color: "#b5181822"
-            border.width: 1
-            border.color: "#805c606b"
+            color: shell.panelBackground
+            border.width: 0
+
+            PanelEdge {
+                anchors.fill: parent
+            }
 
             Column {
                 id: radarContent
                 anchors.centerIn: parent
-                width: 280
+                width: shell.panelContentWidth
                 spacing: 5
 
                 Item {
@@ -1346,7 +1410,7 @@ Scope {
                         text: "雨雲レーダー"
                         color: "#f5f7ff"
                         font.family: "Noto Sans JP"
-                        font.pixelSize: 18
+                        font.pixelSize: shell.panelTitleSize
                         font.weight: Font.Medium
                     }
 
@@ -1362,7 +1426,7 @@ Scope {
                             : shell.radarFetchFailed ? "取得失敗" : "取得中…"
                         color: shell.radarFetchFailed ? "#efa0ad" : "#c7cad5"
                         font.family: "Noto Sans JP"
-                        font.pixelSize: 12
+                        font.pixelSize: shell.panelMetaSize
                         font.weight: Font.Normal
                     }
                 }

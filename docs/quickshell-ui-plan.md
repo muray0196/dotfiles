@@ -65,17 +65,27 @@ Unify the chrome around the content while preserving the content itself:
 6. Keep the current fonts until the structural grammar is coherent. Typography
    can then be tested separately and rolled back independently.
 
+## Experiment 1: shared panel chrome
+
+Kept on top of pushed rollback baseline `c088bb2`:
+
+- a one-pixel two-tone edge, lighter on the top/left and darker on the
+  bottom/right;
+- 18 px medium-weight panel titles, with the large clock retained as an
+  intentional exception;
+- one neutral divider tone across performance, calendar, and weather panels;
+- shared 280 px content width, 10 px panel/major-section rhythm, and existing
+  tighter spacing where dense content needs it.
+
+The experiment changes no data, behavior, content order, font families, icons,
+or semantic colors. It was evaluated with both widget columns visible at
+1920x1080.
+
 ## Next experiment
 
-The first experiment should change only the following:
-
-- shared panel edge;
-- title-row rules;
-- divider rules;
-- spacing tokens.
-
-It must not change data, behavior, content order, fonts, icons, or semantic
-colors. Evaluate both sides together on the live desktop before keeping it.
+Test a slightly more mechanical treatment for small Latin labels and metadata
+only. Keep Japanese text and large/readout typography unchanged, and do not
+combine it with further geometry or color changes.
 
 ## Later experiments
 
