@@ -33,12 +33,26 @@ docker compose version >/dev/null 2>&1 || die "Docker Compose plugin is unavaila
 mkdir -p "$STACK_DIR"
 cp -a "$SOURCE_DIR/." "$STACK_DIR/"
 
-existing_secret=""
+existing_searxng_secret=""
+existing_crawl4ai_token=""
+existing_crawl4ai_secret_key=""
+existing_searxng_host_port=""
 if [[ -r "$STACK_DIR/.env" ]]; then
-  existing_secret="$(sed -n 's/^SEARXNG_SECRET=//p' "$STACK_DIR/.env" | head -n 1)"
+  existing_searxng_secret="$(sed -n 's/^SEARXNG_SECRET=//p' "$STACK_DIR/.env" | head -n 1)"
+  existing_crawl4ai_token="$(sed -n 's/^CRAWL4AI_API_TOKEN=//p' "$STACK_DIR/.env" | head -n 1)"
+  existing_crawl4ai_secret_key="$(sed -n 's/^CRAWL4AI_SECRET_KEY=//p' "$STACK_DIR/.env" | head -n 1)"
+  existing_searxng_host_port="$(sed -n 's/^SEARXNG_HOST_PORT=//p' "$STACK_DIR/.env" | head -n 1)"
 fi
-SEARXNG_SECRET="${SEARXNG_SECRET:-${existing_secret:-$(openssl rand -hex 32)}}"
-printf 'SEARXNG_SECRET=%s\n' "$SEARXNG_SECRET" >"$STACK_DIR/.env"
+SEARXNG_SECRET="${SEARXNG_SECRET:-${existing_searxng_secret:-$(openssl rand -hex 32)}}"
+CRAWL4AI_API_TOKEN="${CRAWL4AI_API_TOKEN:-${existing_crawl4ai_token:-$(openssl rand -hex 32)}}"
+CRAWL4AI_SECRET_KEY="${CRAWL4AI_SECRET_KEY:-${existing_crawl4ai_secret_key:-$(openssl rand -hex 32)}}"
+SEARXNG_HOST_PORT="${SEARXNG_HOST_PORT:-${existing_searxng_host_port:-8888}}"
+{
+  printf 'SEARXNG_SECRET=%s\n' "$SEARXNG_SECRET"
+  printf 'CRAWL4AI_API_TOKEN=%s\n' "$CRAWL4AI_API_TOKEN"
+  printf 'CRAWL4AI_SECRET_KEY=%s\n' "$CRAWL4AI_SECRET_KEY"
+  printf 'SEARXNG_HOST_PORT=%s\n' "$SEARXNG_HOST_PORT"
+} >"$STACK_DIR/.env"
 chmod 0600 "$STACK_DIR/.env"
 sed -i "s/__SEARXNG_SECRET__/$SEARXNG_SECRET/g" "$STACK_DIR/searxng/settings.yml"
 

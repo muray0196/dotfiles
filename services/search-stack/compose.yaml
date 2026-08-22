@@ -6,28 +6,53 @@ services:
     container_name: searxng
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${SEARXNG_HOST_PORT:-8888}:8080"
     environment:
-      SEARXNG_BASE_URL: http://localhost:8080/
-      UWSGI_WORKERS: "2"
-      UWSGI_THREADS: "2"
+      FORCE_OWNERSHIP: "false"
+      SEARXNG_BASE_URL: "http://localhost:${SEARXNG_HOST_PORT:-8888}/"
     volumes:
       - ./searxng:/etc/searxng
+      - searxng-cache:/var/cache/searxng
     networks:
       - search
 
   crawl4ai:
-    image: ${CRAWL4AI_IMAGE:-docker.io/unclecode/crawl4ai:0.8.5}
+    image: ${CRAWL4AI_IMAGE:-docker.io/unclecode/crawl4ai:0.9.2}
     container_name: crawl4ai
     restart: unless-stopped
     shm_size: 1gb
     ports:
       - "127.0.0.1:11235:11235"
     environment:
+      CRAWL4AI_API_TOKEN: "${CRAWL4AI_API_TOKEN:?CRAWL4AI_API_TOKEN is required}"
       CRAWL4AI_HOOKS_ENABLED: "false"
+      SECRET_KEY: "${CRAWL4AI_SECRET_KEY:?CRAWL4AI_SECRET_KEY is required}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/lib/redis:uid=999,gid=999,mode=0700
+      - /var/lib/crawl4ai/outputs:uid=999,gid=999,mode=0700
+      - /home/appuser/.crawl4ai:uid=999,gid=999,mode=0700
+      - /home/appuser/.cache/url_seeder:uid=999,gid=999,mode=0700
+      - /home/appuser/.gunicorn:uid=999,gid=999,mode=0700
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11235/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    user: appuser
     networks:
       - search
 
 networks:
   search:
     name: search-stack
+
+volumes:
+  searxng-cache:
