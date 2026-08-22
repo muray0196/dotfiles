@@ -133,6 +133,17 @@ Kept on top of clock-separator commit `95ad4ec`:
 The slimmer rails remain immediately readable while giving labels and numeric
 readouts more visual priority.
 
+## Experiment 6: weather subsection hierarchy
+
+Kept on top of meter-rail commit `99fd954`:
+
+- render `室内` and `屋外` as 16 px subsection titles;
+- retain 18 px for actual panel titles such as the calendar month and radar;
+- preserve font family, weight, alignment, color, and weather content.
+
+The weather groups remain obvious, but no longer compete with panel-level
+headings.
+
 ## Next experiment
 
 Test a restrained section-header treatment independently. It should strengthen

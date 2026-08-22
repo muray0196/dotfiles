@@ -15,6 +15,7 @@ Scope {
     readonly property color dividerColor: "#665c606b"
     readonly property int panelContentWidth: 280
     readonly property int panelTitleSize: 18
+    readonly property int sectionTitleSize: 16
     readonly property int panelMetaSize: 11
     readonly property int panelGap: 10
     property var weekdayNames: ["日", "月", "火", "水", "木", "金", "土"]
@@ -1102,7 +1103,7 @@ Scope {
                     text: "室内"
                     color: "#f5f7ff"
                     font.family: "Noto Sans JP"
-                    font.pixelSize: shell.panelTitleSize
+                    font.pixelSize: shell.sectionTitleSize
                     font.weight: Font.Medium
                 }
 
@@ -1183,7 +1184,7 @@ Scope {
                         text: "屋外"
                         color: "#f5f7ff"
                         font.family: "Noto Sans JP"
-                        font.pixelSize: shell.panelTitleSize
+                        font.pixelSize: shell.sectionTitleSize
                         font.weight: Font.Medium
                     }
 
