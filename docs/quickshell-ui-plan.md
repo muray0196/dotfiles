@@ -81,11 +81,26 @@ The experiment changes no data, behavior, content order, font families, icons,
 or semantic colors. It was evaluated with both widget columns visible at
 1920x1080.
 
+## Experiment 2: mechanical micro-labels
+
+Kept on top of shared-chrome commit `f82f39d`:
+
+- use the already-installed Adwaita Mono only for small Latin labels, platform
+  names, status text, and compact metadata in the performance widget;
+- retain the existing sans-serif faces for panel titles, metric names, models,
+  measurements, and capacities;
+- retain Noto Sans JP for all Japanese text;
+- rely on the existing Adwaita Mono clock readout to connect the treatment
+  across the two sides without forcing mono typography onto the right column.
+
+This experiment changes typography only and was evaluated with both widget
+columns visible at 1920x1080.
+
 ## Next experiment
 
-Test a slightly more mechanical treatment for small Latin labels and metadata
-only. Keep Japanese text and large/readout typography unchanged, and do not
-combine it with further geometry or color changes.
+Test a restrained section-header treatment independently. It should strengthen
+the hierarchy of `STORAGE`, `GRAPHICS`, indoor/outdoor weather, and radar without
+adding colored boxes or reducing the scan speed of the measurements.
 
 ## Later experiments
 

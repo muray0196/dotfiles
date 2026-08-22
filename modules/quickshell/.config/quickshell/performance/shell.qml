@@ -21,6 +21,7 @@ Scope {
     readonly property int panelContentWidth: 280
     readonly property int panelTitleSize: 18
     readonly property int cardSectionSpacing: 10
+    readonly property string smallLabelFont: "Adwaita Mono"
 
     function updateMetrics(target, line) {
         try {
@@ -585,7 +586,7 @@ Scope {
                         && compactGpuSection.gpu.displayConnected === true
                     text: "DISPLAY"
                     color: "#9ece6a"
-                    font.family: "Adwaita Sans"
+                    font.family: shell.smallLabelFont
                     font.pixelSize: 9
                     font.weight: Font.Medium
                     font.letterSpacing: 0.7
@@ -663,7 +664,7 @@ Scope {
                 Text {
                     text: "LOAD"
                     color: "#8b8e99"
-                    font.family: "Adwaita Sans"
+                    font.family: shell.smallLabelFont
                     font.pixelSize: 9
                     font.weight: Font.Medium
                     font.letterSpacing: 0.6
@@ -684,7 +685,7 @@ Scope {
                 Text {
                     text: "VRAM"
                     color: "#8b8e99"
-                    font.family: "Adwaita Sans"
+                    font.family: shell.smallLabelFont
                     font.pixelSize: 9
                     font.weight: Font.Medium
                     font.letterSpacing: 0.6
@@ -717,7 +718,7 @@ Scope {
                 anchors.left: parent.left
                 text: "GRAPHICS"
                 color: "#c7cad5"
-                font.family: "Adwaita Sans"
+                font.family: shell.smallLabelFont
                 font.pixelSize: 10
                 font.weight: Font.Medium
                 font.letterSpacing: 0.8
@@ -727,7 +728,7 @@ Scope {
                 anchors.right: parent.right
                 text: graphicsSection.deviceCount + " DEVICES"
                 color: "#8b8e99"
-                font.family: "Adwaita Sans"
+                font.family: shell.smallLabelFont
                 font.pixelSize: 9
                 font.weight: Font.Medium
                 font.letterSpacing: 0.6
@@ -773,7 +774,7 @@ Scope {
         Text {
             text: metrics.fresh ? "LIVE" : "NO SIGNAL"
             color: metrics.fresh ? "#b9d99d" : "#efa0ad"
-            font.family: "Adwaita Sans"
+            font.family: shell.smallLabelFont
             font.pixelSize: 12
             font.weight: Font.Medium
             font.letterSpacing: 0.7
@@ -832,7 +833,7 @@ Scope {
                     Text {
                         text: platform
                         color: "#f5f7ff"
-                        font.family: "Adwaita Sans"
+                        font.family: shell.smallLabelFont
                         font.pixelSize: 11
                         font.weight: Font.Medium
                         font.letterSpacing: 0.8
@@ -940,7 +941,7 @@ Scope {
                 Text {
                     text: platform
                     color: "#f5f7ff"
-                    font.family: "Adwaita Sans"
+                    font.family: shell.smallLabelFont
                     font.pixelSize: 11
                     font.weight: Font.Medium
                     font.letterSpacing: 0.8
@@ -952,7 +953,7 @@ Scope {
                 anchors.verticalCenter: parent.verticalCenter
                 text: shell.uptime(metrics.uptimeSeconds, metrics.uptimeAvailable)
                 color: "#c7cad5"
-                font.family: "Adwaita Sans"
+                font.family: shell.smallLabelFont
                 font.pixelSize: 11
                 font.weight: Font.Medium
                 font.letterSpacing: 0.6
@@ -963,7 +964,7 @@ Scope {
             width: parent.width
             text: "STORAGE"
             color: "#c7cad5"
-            font.family: "Adwaita Sans"
+            font.family: shell.smallLabelFont
             font.pixelSize: 10
             font.weight: Font.Medium
             font.letterSpacing: 0.8
@@ -1004,7 +1005,7 @@ Scope {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "NETWORK"
                 color: "#c7cad5"
-                font.family: "Adwaita Sans"
+                font.family: shell.smallLabelFont
                 font.pixelSize: 11
                 font.weight: Font.Medium
                 font.letterSpacing: 0.7
