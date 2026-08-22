@@ -6,12 +6,6 @@ Scope {
     id: shell
 
     property bool widgetsVisible: true
-    property bool desktopControlStateAvailable: false
-    property bool waywallenLinkEnabled: true
-    property int displayOffHour: 0
-    property int displayOnHour: 7
-    property int currentHour: new Date().getHours()
-    property string desktopControlError: ""
     readonly property string performanceScriptsDir:
         Quickshell.shellDir + "/scripts"
     readonly property string remoteConfigPath:
@@ -20,73 +14,6 @@ Scope {
         Quickshell.shellDir + "/automation.json"
     readonly property string machineConfigPath:
         Quickshell.shellDir + "/machine.json"
-    readonly property string desktopControlHelper:
-        performanceScriptsDir + "/desktop_controls.py"
-
-    function formatHour(hour) {
-        return (hour < 10 ? "0" : "") + hour + ":00";
-    }
-
-    function isDisplayOffPeriod(hour, offHour, onHour) {
-        return offHour < onHour
-            ? offHour <= hour && hour < onHour
-            : hour >= offHour || hour < onHour;
-    }
-
-    function updateDesktopControlState(payload, fromAction) {
-        try {
-            const state = JSON.parse(payload);
-            if (typeof state.waywallen_link_enabled !== "boolean"
-                    || typeof state.display_off_hour !== "number"
-                    || typeof state.display_on_hour !== "number"
-                    || Math.floor(state.display_off_hour) !== state.display_off_hour
-                    || Math.floor(state.display_on_hour) !== state.display_on_hour
-                    || state.display_off_hour < 0 || state.display_off_hour > 23
-                    || state.display_on_hour < 0 || state.display_on_hour > 23
-                    || state.display_off_hour === state.display_on_hour)
-                throw new Error("Invalid desktop control state");
-
-            waywallenLinkEnabled = state.waywallen_link_enabled;
-            displayOffHour = state.display_off_hour;
-            displayOnHour = state.display_on_hour;
-            desktopControlStateAvailable = true;
-            if (fromAction || desktopControlError.length === 0)
-                desktopControlError = "";
-        } catch (error) {
-            desktopControlError = "Control state unavailable";
-            console.warn("Invalid desktop control state:", error);
-        }
-    }
-
-    function refreshDesktopControls() {
-        if (!desktopControlStatus.running
-                && !desktopControlAction.running)
-            desktopControlStatus.exec([
-                "/usr/bin/python3",
-                "-B",
-                desktopControlHelper,
-                "--settings",
-                automationSettingsPath,
-                "status"
-            ]);
-    }
-
-    function runDesktopControl(commandArguments) {
-        if (desktopControlAction.running)
-            return;
-        desktopControlError = "";
-        desktopControlAction.exec([
-            "/usr/bin/python3",
-            "-B",
-            desktopControlHelper,
-            "--settings",
-            automationSettingsPath
-        ].concat(commandArguments));
-    }
-
-    function toggleWaywallenLink() {
-        runDesktopControl(["waywallen-link", "toggle"]);
-    }
 
     function updateMetrics(target, line) {
         try {
@@ -610,200 +537,39 @@ Scope {
         }
     }
 
-    component ControlValue: Item {
-        id: controlValue
-
-        property string label: ""
-        property string value: ""
-        property color valueColor: "#f5f7ff"
-
-        implicitWidth: 280
-        implicitHeight: 25
-
-        Text {
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
-            text: controlValue.label
-            color: "#c7cad5"
-            font.family: "Adwaita Sans"
-            font.pixelSize: 11
-            font.weight: Font.Medium
-            font.letterSpacing: 0.7
-        }
-
-        Text {
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            text: controlValue.value
-            color: controlValue.valueColor
-            font.family: "Adwaita Sans"
-            font.pixelSize: 14
-            font.weight: Font.Medium
-        }
-    }
-
-    component DesktopControlCard: Rectangle {
-        id: controlCard
-
-        property bool stateAvailable: false
-        property bool waywallenLinkEnabled: true
-        property int displayOffHour: 0
-        property int displayOnHour: 7
-        property int currentHour: 0
-        property bool busy: false
-        property string errorText: ""
-        readonly property bool offPeriodActive: shell.isDisplayOffPeriod(
-            currentHour,
-            displayOffHour,
-            displayOnHour
-        )
-        signal waywallenLinkToggleRequested()
-
-        implicitWidth: 312
-        implicitHeight: controlContent.implicitHeight + 28
-        radius: 0
-        color: "#b5181822"
-        border.width: 1
-        border.color: "#805c606b"
-
-        Column {
-            id: controlContent
-
-            anchors.centerIn: parent
-            width: 280
-            spacing: 9
-
-            Text {
-                text: "DESKTOP CONTROL"
-                color: "#f5f7ff"
-                font.family: "Adwaita Sans"
-                font.pixelSize: 12
-                font.weight: Font.Medium
-                font.letterSpacing: 0.9
-            }
-
-            Item {
-                width: parent.width
-                height: 39
-
-                Row {
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 8
-
-                    Rectangle {
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 10
-                        height: 10
-                        radius: 0
-                        color: !controlCard.stateAvailable ? "#666a76"
-                            : controlCard.waywallenLinkEnabled ? "#9ece6a" : "#666a76"
-                    }
-
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "Waywallen auto switch"
-                        color: "#f5f7ff"
-                        font.family: "Noto Sans JP"
-                        font.pixelSize: 14
-                        font.weight: Font.Medium
-                    }
-                }
-
-                Rectangle {
-                    id: waywallenButton
-
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 72
-                    height: 31
-                    radius: 0
-                    color: !waywallenMouse.enabled ? "#30313b"
-                        : waywallenMouse.pressed ? "#59606d"
-                        : controlCard.waywallenLinkEnabled ? "#49613f" : "#30313b"
-                    border.width: 1
-                    border.color: "#805c606b"
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: controlCard.busy ? "..."
-                            : !controlCard.stateAvailable ? "--"
-                            : controlCard.waywallenLinkEnabled ? "ON" : "OFF"
-                        color: "#f5f7ff"
-                        font.family: "Adwaita Sans"
-                        font.pixelSize: 12
-                        font.weight: Font.DemiBold
-                        font.letterSpacing: 0.6
-                    }
-
-                    MouseArea {
-                        id: waywallenMouse
-
-                        anchors.fill: parent
-                        enabled: controlCard.stateAvailable && !controlCard.busy
-                        cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: controlCard.waywallenLinkToggleRequested()
-                    }
-                }
-            }
-
-            ControlValue {
-                width: parent.width
-                label: "DISPLAY OFF PERIOD"
-                value: shell.formatHour(controlCard.displayOffHour) + "–"
-                    + shell.formatHour(controlCard.displayOnHour)
-            }
-
-            ControlValue {
-                width: parent.width
-                label: "OFF PERIOD NOW"
-                value: !controlCard.stateAvailable ? "--"
-                    : controlCard.offPeriodActive ? "ACTIVE" : "INACTIVE"
-                valueColor: controlCard.offPeriodActive ? "#e0af68" : "#c7cad5"
-            }
-
-            ControlValue {
-                width: parent.width
-                label: "NEXT CHANGE"
-                value: !controlCard.stateAvailable ? "--"
-                    : controlCard.offPeriodActive
-                        ? "ON AT " + shell.formatHour(controlCard.displayOnHour)
-                        : "OFF AT " + shell.formatHour(controlCard.displayOffHour)
-            }
-
-            Text {
-                width: parent.width
-                height: 15
-                visible: controlCard.errorText.length > 0
-                text: controlCard.errorText
-                color: "#efa0ad"
-                font.family: "Adwaita Sans"
-                font.pixelSize: 10
-                elide: Text.ElideRight
-                maximumLineCount: 1
-            }
-        }
-    }
-
     component SystemSummarySection: Column {
         property MetricsData metrics
         property string title: "SYSTEM"
+        property string platform: ""
 
         spacing: 7
 
         Item {
             width: parent.width
-            height: 17
+            height: 33
 
-            Text {
+            Column {
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                text: title
-                color: "#f5f7ff"
-                font.family: "Adwaita Sans"
-                font.pixelSize: 12
-                font.weight: Font.Medium
-                font.letterSpacing: 0.9
+                spacing: 0
+
+                Text {
+                    text: title
+                    color: "#f5f7ff"
+                    font.family: "Adwaita Sans"
+                    font.pixelSize: 12
+                    font.weight: Font.Medium
+                    font.letterSpacing: 0.9
+                }
+
+                Text {
+                    text: platform
+                    color: "#f5f7ff"
+                    font.family: "Adwaita Sans"
+                    font.pixelSize: 11
+                    font.weight: Font.Medium
+                    font.letterSpacing: 0.8
+                }
             }
 
             Text {
@@ -898,23 +664,83 @@ Scope {
         }
     }
 
-    component SystemSummaryCard: Rectangle {
+    component LocalSystemCard: Rectangle {
+        id: localSystemCard
+
         property MetricsData metrics
 
         implicitWidth: 312
-        implicitHeight: summaryContent.implicitHeight + 28
+        implicitHeight: localSystemContent.implicitHeight + 28
         radius: 0
         color: "#b5181822"
         border.width: 1
         border.color: "#805c606b"
 
-        SystemSummarySection {
-            id: summaryContent
+        Column {
+            id: localSystemContent
 
             anchors.centerIn: parent
             width: 280
-            metrics: parent.metrics
-            title: "LOCAL SYSTEM"
+            spacing: 11
+
+            SystemSummarySection {
+                width: parent.width
+                metrics: localSystemCard.metrics
+                title: "LOCAL SYSTEM"
+                platform: "LINUX · ARCH"
+            }
+
+            Rectangle {
+                width: parent.width
+                height: 1
+                color: "#805c606b"
+            }
+
+            ComputeSection {
+                width: parent.width
+                available: localSystemCard.metrics.available
+                symbol: "\ue322"
+                label: "CPU"
+                modelName: localSystemCard.metrics.cpuModel
+                usage: localSystemCard.metrics.cpuUsage
+                temperatureValue: localSystemCard.metrics.cpuTemperature
+                powerValue: localSystemCard.metrics.cpuPower
+                accent: "#7dcfff"
+            }
+
+            ComputeSection {
+                width: parent.width
+                available: localSystemCard.metrics.available
+                symbol: "\ue30d"
+                label: "GPU"
+                modelName: localSystemCard.metrics.gpuModel
+                usage: localSystemCard.metrics.gpuUsage
+                temperatureValue: localSystemCard.metrics.gpuTemperature
+                powerValue: localSystemCard.metrics.gpuPower
+                accent: "#c099ff"
+            }
+
+            MemorySection {
+                width: parent.width
+                available: localSystemCard.metrics.available
+                symbol: "\uf7a3"
+                label: "RAM"
+                used: localSystemCard.metrics.memoryUsed
+                total: localSystemCard.metrics.memoryTotal
+                usage: localSystemCard.metrics.memoryUsage
+                accent: "#9ece6a"
+            }
+
+            MemorySection {
+                width: parent.width
+                available: localSystemCard.metrics.available
+                symbol: "\ue875"
+                label: "VRAM"
+                used: localSystemCard.metrics.vramUsed
+                total: localSystemCard.metrics.vramTotal
+                usage: localSystemCard.metrics.vramUsage
+                accent: "#ff9e64"
+            }
         }
     }
 
@@ -941,57 +767,23 @@ Scope {
         Column {
             id: cards
 
-            readonly property real localSpacing: 6
-            readonly property real outerSpacing: Math.max(0, (
+            readonly property real cardSpacing: Math.max(0,
                 height
-                - desktopControls.implicitHeight
                 - localSystem.implicitHeight
-                - localPerformance.implicitHeight
                 - mainPerformance.implicitHeight
-                - localSpacing
-            ) / 2)
+            )
 
             anchors.fill: parent
             spacing: 0
 
-            DesktopControlCard {
-                id: desktopControls
-
-                stateAvailable: shell.desktopControlStateAvailable
-                waywallenLinkEnabled: shell.waywallenLinkEnabled
-                displayOffHour: shell.displayOffHour
-                displayOnHour: shell.displayOnHour
-                currentHour: shell.currentHour
-                busy: desktopControlAction.running
-                errorText: shell.desktopControlError
-                onWaywallenLinkToggleRequested: shell.toggleWaywallenLink()
-            }
-
-            Item {
-                width: parent.width
-                height: cards.outerSpacing
-            }
-
-            SystemSummaryCard {
+            LocalSystemCard {
                 id: localSystem
                 metrics: localData
             }
 
             Item {
                 width: parent.width
-                height: cards.localSpacing
-            }
-
-            PerformanceCard {
-                id: localPerformance
-                deviceName: "This PC"
-                platform: "LINUX · ARCH"
-                metrics: localData
-            }
-
-            Item {
-                width: parent.width
-                height: cards.outerSpacing
+                height: cards.cardSpacing
             }
 
             PerformanceCard {
@@ -1046,69 +838,6 @@ Scope {
         stdout: SplitParser {
             splitMarker: "\n"
             onRead: line => shell.updateMetrics(remoteData, line)
-        }
-    }
-
-    Process {
-        id: desktopControlStatus
-
-        command: [
-            "/usr/bin/python3",
-            "-B",
-            shell.desktopControlHelper,
-            "--settings",
-            shell.automationSettingsPath,
-            "status"
-        ]
-        running: true
-
-        stdout: StdioCollector {
-            onStreamFinished: shell.updateDesktopControlState(this.text, false)
-        }
-
-        stderr: StdioCollector {
-            onStreamFinished: {
-                const detail = this.text.trim();
-                if (detail.length > 0)
-                    shell.desktopControlError = detail;
-            }
-        }
-
-        onExited: exitCode => {
-            if (exitCode !== 0)
-                shell.desktopControlStateAvailable = false;
-        }
-    }
-
-    Process {
-        id: desktopControlAction
-
-        stdout: StdioCollector {
-            onStreamFinished: shell.updateDesktopControlState(this.text, true)
-        }
-
-        stderr: StdioCollector {
-            onStreamFinished: {
-                const detail = this.text.trim();
-                if (detail.length > 0)
-                    shell.desktopControlError = detail;
-            }
-        }
-
-        onExited: exitCode => {
-            if (exitCode !== 0 && shell.desktopControlError.length === 0)
-                shell.desktopControlError = "Desktop control failed";
-            shell.refreshDesktopControls();
-        }
-    }
-
-    Timer {
-        interval: 5000
-        running: true
-        repeat: true
-        onTriggered: {
-            shell.currentHour = new Date().getHours();
-            shell.refreshDesktopControls();
         }
     }
 
