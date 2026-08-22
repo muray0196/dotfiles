@@ -859,9 +859,9 @@ Scope {
                         height: hourText.implicitHeight
 
                         Rectangle {
-                            width: 10
-                            height: 10
-                            radius: 5
+                            width: 8
+                            height: 8
+                            radius: 0
                             color: "#f5f7ff"
                             anchors {
                                 horizontalCenter: parent.horizontalCenter
@@ -871,9 +871,9 @@ Scope {
                         }
 
                         Rectangle {
-                            width: 10
-                            height: 10
-                            radius: 5
+                            width: 8
+                            height: 8
+                            radius: 0
                             color: "#f5f7ff"
                             anchors {
                                 horizontalCenter: parent.horizontalCenter

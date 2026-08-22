@@ -112,6 +112,17 @@ The fixed-width readings improve column alignment and add a restrained
 instrument-panel character. The experiment was evaluated with both widget
 columns visible at 1920x1080.
 
+## Experiment 4: square clock colon
+
+Kept on top of alignment commit `ec98aae`:
+
+- replace the two 10 px circular clock separators with restrained 8 px square
+  marks;
+- preserve their position, spacing, color, and update behavior.
+
+This removes the most prominent rounded detail from the primary clock without
+altering its legibility or geometry.
+
 ## Next experiment
 
 Test a restrained section-header treatment independently. It should strengthen
