@@ -22,6 +22,7 @@ Scope {
     readonly property int panelTitleSize: 18
     readonly property int cardSectionSpacing: 10
     readonly property string smallLabelFont: "Adwaita Mono"
+    readonly property string numericFont: "Adwaita Mono"
 
     function updateMetrics(target, line) {
         try {
@@ -348,7 +349,7 @@ Scope {
             Text {
                 text: value
                 color: "#f5f7ff"
-                font.family: "Noto Sans JP"
+                font.family: shell.numericFont
                 font.pixelSize: 16
             }
         }
@@ -469,7 +470,7 @@ Scope {
                 anchors.verticalCenter: parent.verticalCenter
                 text: shell.memoryAmount(used, total, available)
                 color: "#f5f7ff"
-                font.family: "Adwaita Sans"
+                font.family: shell.numericFont
                 font.pixelSize: 14
             }
         }
@@ -529,7 +530,7 @@ Scope {
                     : "NOT MOUNTED"
                 color: storageVolumeSection.available
                     ? "#f5f7ff" : "#8b8e99"
-                font.family: "Adwaita Sans"
+                font.family: shell.numericFont
                 font.pixelSize: 13
             }
         }
@@ -633,7 +634,7 @@ Scope {
                         + "  ·  " + shell.power(compactGpuSection.gpu
                             ? compactGpuSection.gpu.power : null)
                 color: "#c7cad5"
-                font.family: "Adwaita Sans"
+                font.family: shell.numericFont
                 font.pixelSize: 12
             }
 
@@ -648,7 +649,7 @@ Scope {
                     compactGpuSection.vramAvailable
                 )
                 color: "#f5f7ff"
-                font.family: "Adwaita Sans"
+                font.family: shell.numericFont
                 font.pixelSize: 11
             }
         }
@@ -1022,7 +1023,7 @@ Scope {
                     metrics.networkAvailable
                 )
                 color: "#f5f7ff"
-                font.family: "Adwaita Sans"
+                font.family: shell.numericFont
                 font.pixelSize: 13
             }
         }

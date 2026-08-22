@@ -96,6 +96,20 @@ Kept on top of shared-chrome commit `f82f39d`:
 This experiment changes typography only and was evaluated with both widget
 columns visible at 1920x1080.
 
+## Experiment 3: aligned instrument readouts
+
+Kept on top of micro-label commit `bcd07ad`:
+
+- use Adwaita Mono for compact numeric readings in the performance widget:
+  temperatures, power, memory/storage capacities, GPU VRAM, and network rates;
+- retain sans-serif typography for panel titles, metric names, and hardware
+  models so the widget does not become a full terminal theme;
+- make no changes to values, precision, units, geometry, or colors.
+
+The fixed-width readings improve column alignment and add a restrained
+instrument-panel character. The experiment was evaluated with both widget
+columns visible at 1920x1080.
+
 ## Next experiment
 
 Test a restrained section-header treatment independently. It should strengthen
