@@ -40,7 +40,8 @@ This baseline is the rollback point before further design experiments.
 - It is not presented as the local counterpart of Main PC; the former `This PC`
   identity and paired-card structure have been removed.
 - Main PC remains a separate remote-status card with its existing LIVE/NO SIGNAL
-  behavior and zeroed stale measurements.
+  behavior and zeroed stale measurements. While stale, its identity and metric
+  content are muted, but the `NO SIGNAL` indicator remains prominent.
 - Desktop Control is no longer visible in the widget. Background heartbeat,
   Waywallen, brightness, and scheduled display automation remain independent of
   the visible card hierarchy.

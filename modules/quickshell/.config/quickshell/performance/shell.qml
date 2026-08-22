@@ -743,6 +743,8 @@ Scope {
             zeroValuesWhenStale && !metrics.fresh
         readonly property bool valuesAvailable:
             metrics.available || showingZeroValues
+        readonly property real contentOpacity:
+            showingZeroValues ? 0.38 : 1.0
 
         function displayedValue(value) {
             return showingZeroValues ? 0 : value;
@@ -768,6 +770,7 @@ Scope {
                 Column {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
+                    opacity: performanceCard.contentOpacity
                     spacing: 0
 
                     Text {
@@ -797,6 +800,7 @@ Scope {
 
             ComputeSection {
                 width: parent.width
+                opacity: performanceCard.contentOpacity
                 available: performanceCard.valuesAvailable
                 symbol: "\ue322"
                 label: "CPU"
@@ -811,6 +815,7 @@ Scope {
 
             ComputeSection {
                 width: parent.width
+                opacity: performanceCard.contentOpacity
                 available: performanceCard.valuesAvailable
                 symbol: "\ue30d"
                 label: "GPU"
@@ -825,6 +830,7 @@ Scope {
 
             MemorySection {
                 width: parent.width
+                opacity: performanceCard.contentOpacity
                 available: performanceCard.valuesAvailable
                 symbol: "\uf7a3"
                 label: "RAM"
@@ -836,6 +842,7 @@ Scope {
 
             MemorySection {
                 width: parent.width
+                opacity: performanceCard.contentOpacity
                 available: performanceCard.valuesAvailable
                 symbol: "\ue875"
                 label: "VRAM"
