@@ -1,0 +1,10 @@
+{
+  "automation_enabled": false,
+  "waywallen_control": null,
+  "ddc_enabled": false,
+  "ddc_bus": null,
+  "brightness_feature": "10",
+  "online_brightness": 20,
+  "offline_brightness": 0,
+  "brightness_retry_seconds": 10.0
+}

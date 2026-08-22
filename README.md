@@ -110,6 +110,32 @@ Conflicting files are preserved under `~/.local/state/dotfiles-linux/backups/`.
 
 Place machine-specific settings in `~/.zshrc.local` and `~/.gitconfig.local`.
 
+## Quickshell desktop widgets (opt-in)
+
+The `quickshell` module contains the Arch/Hyprland desktop widgets and is kept
+out of the shared profiles. Preview and install it explicitly:
+
+```bash
+./install.sh --module quickshell --dry-run --plan
+./install.sh --module quickshell
+```
+
+Real credentials, location data, BLE identifiers, display hardware settings,
+and mutable automation state are local files and are never tracked. Create only
+the files needed for this machine from the adjacent `*.example.json` templates:
+
+```text
+~/.config/quickshell/clock/local.json
+~/.config/quickshell/performance/remote.json
+~/.config/quickshell/performance/machine.json
+~/.config/quickshell/performance/automation.json
+```
+
+Keep those files mode `0600`. A missing or disabled `machine.json` leaves desktop
+automation off, while the performance widget can continue without it. The
+current visual direction and experiment boundaries are recorded in
+[`docs/quickshell-ui-plan.md`](docs/quickshell-ui-plan.md).
+
 Additional setup for GitHub authentication, Docker, SearXNG, and similar tools must be run explicitly from `scripts/`.
 
 ## Package ownership

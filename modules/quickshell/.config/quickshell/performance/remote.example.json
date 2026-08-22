@@ -1,0 +1,4 @@
+{
+  "endpoint": "http://<HOST>:<PORT>/metrics",
+  "token": "<BEARER_TOKEN>"
+}

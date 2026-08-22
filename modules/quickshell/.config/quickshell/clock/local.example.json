@@ -1,0 +1,6 @@
+{
+  "switchbot_address": "<BLE_DEVICE_ADDRESS>",
+  "weathernews_url": "<WEATHERNEWS_AREA_URL>",
+  "latitude": 0.0,
+  "longitude": 0.0
+}

@@ -1,0 +1,3 @@
+# Arch/Hyprland-specific desktop widgets; intentionally opt-in.
+native:stow
+stow:quickshell

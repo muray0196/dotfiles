@@ -15,3 +15,10 @@ services/search-stack/.env
 __pycache__/
 *.py[cod]
 services/search-stack/crawl-results.json
+
+# Quickshell credentials, location, device identity, and mutable host state.
+/modules/quickshell/.config/quickshell/clock/local.json
+/modules/quickshell/.config/quickshell/performance/remote.json
+/modules/quickshell/.config/quickshell/performance/machine.json
+/modules/quickshell/.config/quickshell/performance/automation.json
+/modules/quickshell/.config/quickshell/performance/.automation.json.*
