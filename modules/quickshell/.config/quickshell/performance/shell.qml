@@ -582,7 +582,7 @@ Scope {
 
         Item {
             width: parent.width
-            height: 25
+            height: 27
 
             Row {
                 anchors.left: parent.left
@@ -602,7 +602,7 @@ Scope {
                     text: "GPU " + compactGpuSection.deviceNumber
                     color: "#f5f7ff"
                     font.family: "Adwaita Sans"
-                    font.pixelSize: 17
+                    font.pixelSize: 18
                     font.weight: Font.Medium
                 }
 
@@ -613,7 +613,7 @@ Scope {
                     text: "DISPLAY"
                     color: "#9ece6a"
                     font.family: shell.smallLabelFont
-                    font.pixelSize: 9
+                    font.pixelSize: 10
                     font.weight: Font.Medium
                     font.letterSpacing: 0.7
                 }
@@ -640,14 +640,14 @@ Scope {
                 : "Model unavailable"
             color: "#f5f7ff"
             font.family: "Adwaita Sans"
-            font.pixelSize: 12
+            font.pixelSize: 13
             elide: Text.ElideRight
             maximumLineCount: 1
         }
 
         Item {
             width: parent.width
-            height: 18
+            height: 20
 
             Text {
                 anchors.left: parent.left
@@ -662,13 +662,13 @@ Scope {
                 textFormat: Text.StyledText
                 color: "#c7cad5"
                 font.family: shell.numericFont
-                font.pixelSize: 12
+                font.pixelSize: 13
             }
 
             Text {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                text: "VRAM\u00a0\u00a0" + shell.memoryAmount(
+                text: shell.memoryAmount(
                     compactGpuSection.vramAvailable
                         ? compactGpuSection.gpu.vram.used : 0,
                     compactGpuSection.vramAvailable
@@ -678,7 +678,7 @@ Scope {
                 textFormat: Text.StyledText
                 color: "#f5f7ff"
                 font.family: shell.numericFont
-                font.pixelSize: 11
+                font.pixelSize: 13
             }
         }
 
@@ -694,7 +694,7 @@ Scope {
                     text: "LOAD"
                     color: "#8b8e99"
                     font.family: shell.smallLabelFont
-                    font.pixelSize: 9
+                    font.pixelSize: 10
                     font.weight: Font.Medium
                     font.letterSpacing: 0.6
                 }
@@ -715,7 +715,7 @@ Scope {
                     text: "VRAM"
                     color: "#8b8e99"
                     font.family: shell.smallLabelFont
-                    font.pixelSize: 9
+                    font.pixelSize: 10
                     font.weight: Font.Medium
                     font.letterSpacing: 0.6
                 }
@@ -748,7 +748,7 @@ Scope {
                 text: "GRAPHICS"
                 color: "#c7cad5"
                 font.family: shell.smallLabelFont
-                font.pixelSize: 10
+                font.pixelSize: 11
                 font.weight: Font.Medium
                 font.letterSpacing: 0.8
             }
@@ -758,7 +758,7 @@ Scope {
                 text: graphicsSection.deviceCount + " DEVICES"
                 color: "#8b8e99"
                 font.family: shell.smallLabelFont
-                font.pixelSize: 9
+                font.pixelSize: 10
                 font.weight: Font.Medium
                 font.letterSpacing: 0.6
             }

@@ -155,6 +155,19 @@ Kept on top of weather-hierarchy commit `6af9a1c`:
 
 This separates values from units without adding columns or extra decoration.
 
+## Experiment 8: clearer local GPU hierarchy
+
+Kept on top of muted-unit commit `a22f8c4`:
+
+- show `VRAM` once per GPU, beside its utilization rail, instead of repeating it
+  on the capacity line;
+- enlarge the Local System GPU titles, model names, readings, and micro-labels
+  to use the available card space;
+- leave the Main PC card unchanged.
+
+This makes each GPU easier to scan without changing its data or adding visual
+decoration.
+
 ## Next experiment
 
 Test a restrained section-header treatment independently. It should strengthen
