@@ -123,6 +123,16 @@ Kept on top of alignment commit `ec98aae`:
 This removes the most prominent rounded detail from the primary clock without
 altering its legibility or geometry.
 
+## Experiment 5: lighter meter rails
+
+Kept on top of clock-separator commit `95ad4ec`:
+
+- reduce continuous utilization rails from 7 px to 5 px;
+- preserve fill colors, empty-track contrast, values, and square ends.
+
+The slimmer rails remain immediately readable while giving labels and numeric
+readouts more visual priority.
+
 ## Next experiment
 
 Test a restrained section-header treatment independently. It should strengthen

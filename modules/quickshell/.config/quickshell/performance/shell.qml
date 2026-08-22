@@ -311,7 +311,7 @@ Scope {
         property real value: 0
         property color accent: "#7dcfff"
 
-        implicitHeight: 7
+        implicitHeight: 5
         radius: 0
         color: "#30f5f7ff"
 
