@@ -158,12 +158,18 @@ Scope {
             .trim();
     }
 
+    function mutedUnit(value) {
+        return "<font color=\"#8b8e99\">" + value + "</font>";
+    }
+
     function temperature(value) {
-        return typeof value === "number" ? value.toFixed(0) + "°C" : "--°C";
+        return (typeof value === "number" ? value.toFixed(0) : "--")
+            + mutedUnit("°C");
     }
 
     function power(value) {
-        return typeof value === "number" ? value.toFixed(0) + " W" : "-- W";
+        return (typeof value === "number" ? value.toFixed(0) : "--")
+            + " " + mutedUnit("W");
     }
 
     function gibibytes(value) {
@@ -172,27 +178,32 @@ Scope {
 
     function memoryAmount(used, total, available) {
         return available
-            ? gibibytes(used) + " / " + gibibytes(total) + " GiB"
-            : "-- / -- GiB";
+            ? gibibytes(used) + " / " + gibibytes(total)
+                + " " + mutedUnit("GiB")
+            : "-- / -- " + mutedUnit("GiB");
     }
 
     function storageAmount(used, total, available) {
         return available
             ? gibibytes(used).replace(".0", "") + " / "
-                + gibibytes(total).replace(".0", "") + " GiB"
-            : "-- / -- GiB";
+                + gibibytes(total).replace(".0", "")
+                + " " + mutedUnit("GiB")
+            : "-- / -- " + mutedUnit("GiB");
     }
 
     function byteRate(value, available) {
         if (!available)
-            return "-- B/s";
+            return "-- " + mutedUnit("B/s");
         if (value >= 1073741824)
-            return (value / 1073741824).toFixed(1) + " GiB/s";
+            return (value / 1073741824).toFixed(1)
+                + " " + mutedUnit("GiB/s");
         if (value >= 1048576)
-            return (value / 1048576).toFixed(1) + " MiB/s";
+            return (value / 1048576).toFixed(1)
+                + " " + mutedUnit("MiB/s");
         if (value >= 1024)
-            return (value / 1024).toFixed(1) + " KiB/s";
-        return value.toFixed(0) + " B/s";
+            return (value / 1024).toFixed(1)
+                + " " + mutedUnit("KiB/s");
+        return value.toFixed(0) + " " + mutedUnit("B/s");
     }
 
     function uptime(value, available) {
@@ -350,6 +361,7 @@ Scope {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: value
+                textFormat: Text.StyledText
                 color: "#f5f7ff"
                 font.family: shell.numericFont
                 font.pixelSize: 16
@@ -475,6 +487,7 @@ Scope {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 text: shell.memoryAmount(used, total, available)
+                textFormat: Text.StyledText
                 color: "#f5f7ff"
                 font.family: shell.numericFont
                 font.pixelSize: 14
@@ -536,6 +549,7 @@ Scope {
                         true
                     )
                     : "NOT MOUNTED"
+                textFormat: Text.StyledText
                 color: storageVolumeSection.available
                     ? "#f5f7ff" : "#8b8e99"
                 font.family: shell.numericFont
@@ -642,8 +656,10 @@ Scope {
                     ? "POWER SAVING"
                     : shell.temperature(compactGpuSection.gpu
                         ? compactGpuSection.gpu.temperature : null)
-                        + "  ·  " + shell.power(compactGpuSection.gpu
+                        + "\u00a0\u00a0·\u00a0\u00a0"
+                        + shell.power(compactGpuSection.gpu
                             ? compactGpuSection.gpu.power : null)
+                textFormat: Text.StyledText
                 color: "#c7cad5"
                 font.family: shell.numericFont
                 font.pixelSize: 12
@@ -652,13 +668,14 @@ Scope {
             Text {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                text: "VRAM  " + shell.memoryAmount(
+                text: "VRAM\u00a0\u00a0" + shell.memoryAmount(
                     compactGpuSection.vramAvailable
                         ? compactGpuSection.gpu.vram.used : 0,
                     compactGpuSection.vramAvailable
                         ? compactGpuSection.gpu.vram.total : 0,
                     compactGpuSection.vramAvailable
                 )
+                textFormat: Text.StyledText
                 color: "#f5f7ff"
                 font.family: shell.numericFont
                 font.pixelSize: 11
@@ -1029,10 +1046,11 @@ Scope {
                 text: "↓ " + shell.byteRate(
                     metrics.networkDownload,
                     metrics.networkAvailable
-                ) + "    ↑ " + shell.byteRate(
+                ) + "\u00a0\u00a0\u00a0\u00a0↑ " + shell.byteRate(
                     metrics.networkUpload,
                     metrics.networkAvailable
                 )
+                textFormat: Text.StyledText
                 color: "#f5f7ff"
                 font.family: shell.numericFont
                 font.pixelSize: 13

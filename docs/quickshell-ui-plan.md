@@ -144,6 +144,17 @@ Kept on top of meter-rail commit `99fd954`:
 The weather groups remain obvious, but no longer compete with panel-level
 headings.
 
+## Experiment 7: muted measurement units
+
+Kept on top of weather-hierarchy commit `6af9a1c`:
+
+- retain bright numeric readings while muting only `°C`, `W`, storage/memory
+  units, and network-rate units;
+- preserve font size, font family, precision, spacing, and value semantics;
+- apply the treatment consistently to Local System and Main PC.
+
+This separates values from units without adding columns or extra decoration.
+
 ## Next experiment
 
 Test a restrained section-header treatment independently. It should strengthen
