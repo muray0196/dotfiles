@@ -42,6 +42,47 @@ Scope {
             target.vramUsed = reading.vram.used_bytes;
             target.vramTotal = reading.vram.total_bytes;
             target.vramUsage = reading.vram.usage_percent;
+            const gpuEntries = [];
+            const sourceGpus = Array.isArray(reading.gpus)
+                ? reading.gpus
+                : [{
+                    id: "primary",
+                    display_connected: false,
+                    model: reading.gpu.model,
+                    usage_percent: reading.gpu.usage_percent,
+                    temperature_c: reading.gpu.temperature_c,
+                    power_w: reading.gpu.power_w,
+                    vram: reading.vram
+                }];
+            for (let index = 0; index < sourceGpus.length; index++) {
+                const gpu = sourceGpus[index];
+                if (!gpu || typeof gpu !== "object")
+                    continue;
+                const vram = gpu.vram && typeof gpu.vram === "object"
+                    ? gpu.vram : {};
+                const gpuAvailable = typeof gpu.usage_percent === "number";
+                const vramAvailable = typeof vram.used_bytes === "number"
+                    && typeof vram.total_bytes === "number"
+                    && typeof vram.usage_percent === "number";
+                gpuEntries.push({
+                    id: typeof gpu.id === "string" ? gpu.id : "gpu-" + index,
+                    displayConnected: gpu.display_connected === true,
+                    model: typeof gpu.model === "string" ? gpu.model : "",
+                    runtimeStatus: typeof gpu.runtime_status === "string"
+                        ? gpu.runtime_status : "",
+                    available: gpuAvailable,
+                    usage: gpuAvailable ? gpu.usage_percent : 0,
+                    temperature: gpu.temperature_c,
+                    power: gpu.power_w,
+                    vram: {
+                        available: vramAvailable,
+                        used: vramAvailable ? vram.used_bytes : 0,
+                        total: vramAvailable ? vram.total_bytes : 0,
+                        usage: vramAvailable ? vram.usage_percent : 0
+                    }
+                });
+            }
+            target.gpus = gpuEntries;
             target.storageAvailable = reading.storage !== null
                 && typeof reading.storage === "object"
                 && typeof reading.storage.used_bytes === "number"
@@ -52,6 +93,29 @@ Scope {
                 target.storageTotal = reading.storage.total_bytes;
                 target.storageUsage = reading.storage.usage_percent;
             }
+            const storageEntries = [];
+            if (Array.isArray(reading.storage_volumes)) {
+                for (let index = 0; index < reading.storage_volumes.length; index++) {
+                    const volume = reading.storage_volumes[index];
+                    if (!volume || typeof volume !== "object"
+                            || typeof volume.label !== "string")
+                        continue;
+                    const volumeAvailable = volume.available === true
+                        && typeof volume.used_bytes === "number"
+                        && typeof volume.total_bytes === "number"
+                        && typeof volume.usage_percent === "number";
+                    storageEntries.push({
+                        label: volume.label,
+                        kind: typeof volume.kind === "string"
+                            ? volume.kind : "other",
+                        available: volumeAvailable,
+                        used: volumeAvailable ? volume.used_bytes : 0,
+                        total: volumeAvailable ? volume.total_bytes : 0,
+                        usage: volumeAvailable ? volume.usage_percent : 0
+                    });
+                }
+            }
+            target.storageVolumes = storageEntries;
             target.networkAvailable = reading.network !== null
                 && typeof reading.network === "object"
                 && typeof reading.network.download_bytes_per_second === "number"
@@ -155,10 +219,12 @@ Scope {
         property real vramUsed: 0
         property real vramTotal: 0
         property real vramUsage: 0
+        property var gpus: []
         property bool storageAvailable: false
         property real storageUsed: 0
         property real storageTotal: 0
         property real storageUsage: 0
+        property var storageVolumes: []
         property bool networkAvailable: false
         property real networkDownload: 0
         property real networkUpload: 0
@@ -398,6 +464,296 @@ Scope {
         }
     }
 
+    component StorageVolumeSection: Column {
+        id: storageVolumeSection
+
+        property string label: "STORAGE"
+        property bool available: false
+        property real used: 0
+        property real total: 0
+        property real usage: 0
+
+        spacing: 4
+
+        Item {
+            width: parent.width
+            height: 25
+
+            Row {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 7
+
+                Text {
+                    text: "\ue1db"
+                    color: "#e0af68"
+                    font.family: "Material Symbols Rounded"
+                    font.pixelSize: 21
+                }
+
+                Text {
+                    text: storageVolumeSection.label
+                    color: "#f5f7ff"
+                    font.family: "Adwaita Sans"
+                    font.pixelSize: 15
+                    font.weight: Font.Medium
+                }
+            }
+
+            Text {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: storageVolumeSection.available
+                    ? shell.storageAmount(
+                        storageVolumeSection.used,
+                        storageVolumeSection.total,
+                        true
+                    ) + "  " + shell.percent(
+                        storageVolumeSection.usage,
+                        true
+                    )
+                    : "NOT MOUNTED"
+                color: storageVolumeSection.available
+                    ? "#f5f7ff" : "#8b8e99"
+                font.family: "Adwaita Sans"
+                font.pixelSize: 13
+            }
+        }
+
+        UsageBar {
+            width: parent.width
+            value: storageVolumeSection.available
+                ? storageVolumeSection.usage : 0
+            accent: "#e0af68"
+        }
+    }
+
+    component CompactGpuSection: Column {
+        id: compactGpuSection
+
+        property var gpu: ({})
+        property int deviceNumber: 1
+        readonly property bool gpuAvailable: gpu
+            && gpu.available === true
+        readonly property bool vramAvailable: gpu
+            && gpu.vram
+            && gpu.vram.available === true
+        readonly property bool sleeping: gpu
+            && gpu.runtimeStatus === "suspended"
+
+        spacing: 4
+
+        Item {
+            width: parent.width
+            height: 25
+
+            Row {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 7
+
+                Text {
+                    text: "\ue30d"
+                    color: "#c099ff"
+                    font.family: "Material Symbols Rounded"
+                    font.pixelSize: 22
+                }
+
+                Text {
+                    text: "GPU " + compactGpuSection.deviceNumber
+                    color: "#f5f7ff"
+                    font.family: "Adwaita Sans"
+                    font.pixelSize: 17
+                    font.weight: Font.Medium
+                }
+
+                Text {
+                    visible: compactGpuSection.gpu
+                        && compactGpuSection.gpu.displayConnected === true
+                    text: "DISPLAY"
+                    color: "#9ece6a"
+                    font.family: "Adwaita Sans"
+                    font.pixelSize: 9
+                    font.weight: Font.Medium
+                    font.letterSpacing: 0.7
+                }
+            }
+
+            Text {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: compactGpuSection.sleeping
+                    ? "SLEEP"
+                    : shell.percent(
+                        compactGpuSection.gpuAvailable
+                            ? compactGpuSection.gpu.usage : 0,
+                        compactGpuSection.gpuAvailable
+                    )
+                color: compactGpuSection.sleeping
+                    ? "#8b8e99" : "#f5f7ff"
+                font.family: "Adwaita Sans"
+                font.pixelSize: 18
+                font.weight: Font.Medium
+            }
+        }
+
+        Text {
+            width: parent.width
+            text: compactGpuSection.gpu
+                && typeof compactGpuSection.gpu.model === "string"
+                && compactGpuSection.gpu.model.length > 0
+                ? shell.compactModelName(compactGpuSection.gpu.model)
+                : "Model unavailable"
+            color: "#f5f7ff"
+            font.family: "Adwaita Sans"
+            font.pixelSize: 12
+            elide: Text.ElideRight
+            maximumLineCount: 1
+        }
+
+        Item {
+            width: parent.width
+            height: 18
+
+            Text {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: compactGpuSection.sleeping
+                    ? "POWER SAVING"
+                    : shell.temperature(compactGpuSection.gpu
+                        ? compactGpuSection.gpu.temperature : null)
+                        + "  ·  " + shell.power(compactGpuSection.gpu
+                            ? compactGpuSection.gpu.power : null)
+                color: "#c7cad5"
+                font.family: "Adwaita Sans"
+                font.pixelSize: 12
+            }
+
+            Text {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: "VRAM  " + shell.memoryAmount(
+                    compactGpuSection.vramAvailable
+                        ? compactGpuSection.gpu.vram.used : 0,
+                    compactGpuSection.vramAvailable
+                        ? compactGpuSection.gpu.vram.total : 0,
+                    compactGpuSection.vramAvailable
+                ) + "  " + shell.percent(
+                    compactGpuSection.vramAvailable
+                        ? compactGpuSection.gpu.vram.usage : 0,
+                    compactGpuSection.vramAvailable
+                )
+                color: "#f5f7ff"
+                font.family: "Adwaita Sans"
+                font.pixelSize: 11
+            }
+        }
+
+        Row {
+            width: parent.width
+            spacing: 12
+
+            Column {
+                width: (parent.width - parent.spacing) / 2
+                spacing: 3
+
+                Text {
+                    text: "LOAD"
+                    color: "#8b8e99"
+                    font.family: "Adwaita Sans"
+                    font.pixelSize: 9
+                    font.weight: Font.Medium
+                    font.letterSpacing: 0.6
+                }
+
+                UsageBar {
+                    width: parent.width
+                    value: compactGpuSection.gpuAvailable
+                        ? compactGpuSection.gpu.usage : 0
+                    accent: "#c099ff"
+                }
+            }
+
+            Column {
+                width: (parent.width - parent.spacing) / 2
+                spacing: 3
+
+                Text {
+                    text: "VRAM"
+                    color: "#8b8e99"
+                    font.family: "Adwaita Sans"
+                    font.pixelSize: 9
+                    font.weight: Font.Medium
+                    font.letterSpacing: 0.6
+                }
+
+                UsageBar {
+                    width: parent.width
+                    value: compactGpuSection.vramAvailable
+                        ? compactGpuSection.gpu.vram.usage : 0
+                    accent: "#ff9e64"
+                }
+            }
+        }
+    }
+
+    component GraphicsSection: Column {
+        id: graphicsSection
+
+        property var gpus: []
+        readonly property int deviceCount: Array.isArray(gpus)
+            ? gpus.length : 0
+
+        spacing: 8
+
+        Item {
+            width: parent.width
+            height: 15
+
+            Text {
+                anchors.left: parent.left
+                text: "GRAPHICS"
+                color: "#c7cad5"
+                font.family: "Adwaita Sans"
+                font.pixelSize: 10
+                font.weight: Font.Medium
+                font.letterSpacing: 0.8
+            }
+
+            Text {
+                anchors.right: parent.right
+                text: graphicsSection.deviceCount + " DEVICES"
+                color: "#8b8e99"
+                font.family: "Adwaita Sans"
+                font.pixelSize: 9
+                font.weight: Font.Medium
+                font.letterSpacing: 0.6
+            }
+        }
+
+        Repeater {
+            model: graphicsSection.deviceCount
+
+            delegate: CompactGpuSection {
+                required property int index
+
+                width: graphicsSection.width
+                gpu: graphicsSection.gpus[index]
+                deviceNumber: index + 1
+            }
+        }
+
+        Text {
+            visible: graphicsSection.deviceCount === 0
+            text: "NO GPU DATA"
+            color: "#8b8e99"
+            font.family: "Adwaita Sans"
+            font.pixelSize: 11
+            font.weight: Font.Medium
+            font.letterSpacing: 0.7
+        }
+    }
+
     component FreshnessStatus: Row {
         property MetricsData metrics
 
@@ -538,9 +894,14 @@ Scope {
     }
 
     component SystemSummarySection: Column {
+        id: systemSummarySection
+
         property MetricsData metrics
         property string title: "SYSTEM"
         property string platform: ""
+        readonly property int storageVolumeCount: metrics
+            && Array.isArray(metrics.storageVolumes)
+            ? metrics.storageVolumes.length : 0
 
         spacing: 7
 
@@ -584,52 +945,40 @@ Scope {
             }
         }
 
-        Item {
+        Text {
             width: parent.width
-            height: 25
-
-            Row {
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 7
-
-                Text {
-                    text: "\ue1db"
-                    color: "#e0af68"
-                    font.family: "Material Symbols Rounded"
-                    font.pixelSize: 21
-                }
-
-                Text {
-                    text: "ROOT"
-                    color: "#f5f7ff"
-                    font.family: "Adwaita Sans"
-                    font.pixelSize: 15
-                    font.weight: Font.Medium
-                }
-            }
-
-            Text {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: shell.storageAmount(
-                    metrics.storageUsed,
-                    metrics.storageTotal,
-                    metrics.storageAvailable
-                ) + "  " + shell.percent(
-                    metrics.storageUsage,
-                    metrics.storageAvailable
-                )
-                color: "#f5f7ff"
-                font.family: "Adwaita Sans"
-                font.pixelSize: 13
-            }
+            text: "STORAGE"
+            color: "#c7cad5"
+            font.family: "Adwaita Sans"
+            font.pixelSize: 10
+            font.weight: Font.Medium
+            font.letterSpacing: 0.8
         }
 
-        UsageBar {
+        StorageVolumeSection {
             width: parent.width
-            value: metrics.storageAvailable ? metrics.storageUsage : 0
-            accent: "#e0af68"
+            label: "ROOT"
+            available: metrics.storageAvailable
+            used: metrics.storageUsed
+            total: metrics.storageTotal
+            usage: metrics.storageUsage
+        }
+
+        Repeater {
+            model: systemSummarySection.storageVolumeCount
+
+            delegate: StorageVolumeSection {
+                required property int index
+                readonly property var volume:
+                    systemSummarySection.metrics.storageVolumes[index]
+
+                width: systemSummarySection.width
+                label: volume.label
+                available: volume.available
+                used: volume.used
+                total: volume.total
+                usage: volume.usage
+            }
         }
 
         Item {
@@ -708,18 +1057,6 @@ Scope {
                 accent: "#7dcfff"
             }
 
-            ComputeSection {
-                width: parent.width
-                available: localSystemCard.metrics.available
-                symbol: "\ue30d"
-                label: "GPU"
-                modelName: localSystemCard.metrics.gpuModel
-                usage: localSystemCard.metrics.gpuUsage
-                temperatureValue: localSystemCard.metrics.gpuTemperature
-                powerValue: localSystemCard.metrics.gpuPower
-                accent: "#c099ff"
-            }
-
             MemorySection {
                 width: parent.width
                 available: localSystemCard.metrics.available
@@ -731,15 +1068,9 @@ Scope {
                 accent: "#9ece6a"
             }
 
-            MemorySection {
+            GraphicsSection {
                 width: parent.width
-                available: localSystemCard.metrics.available
-                symbol: "\ue875"
-                label: "VRAM"
-                used: localSystemCard.metrics.vramUsed
-                total: localSystemCard.metrics.vramTotal
-                usage: localSystemCard.metrics.vramUsage
-                accent: "#ff9e64"
+                gpus: localSystemCard.metrics.gpus
             }
         }
     }
@@ -807,7 +1138,9 @@ Scope {
             "-B",
             shell.performanceScriptsDir + "/system_metrics.py",
             "--interval",
-            "2"
+            "2",
+            "--machine-config",
+            shell.machineConfigPath
         ]
         running: true
 

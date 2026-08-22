@@ -30,7 +30,12 @@ This baseline is the rollback point before further design experiments.
 ## Current performance hierarchy
 
 - `LOCAL SYSTEM` is one aggregate card for the current machine: uptime,
-  platform, storage, network, CPU, GPU, RAM, and VRAM.
+  platform, storage, network, CPU, RAM, and graphics.
+- Local storage shows ROOT plus host-specific volumes defined in the ignored
+  machine config. Missing mounts must be shown as unavailable, never as ROOT.
+- Local graphics shows each physical GPU with its own load, temperature, power,
+  and VRAM values. Mark the display GPU and explain a suspended GPU as `SLEEP`
+  instead of making missing live sensors look like a fault.
 - It is not presented as the local counterpart of Main PC; the former `This PC`
   identity and paired-card structure have been removed.
 - Main PC remains a separate remote-status card with its existing LIVE/NO SIGNAL

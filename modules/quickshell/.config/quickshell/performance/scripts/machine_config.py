@@ -6,9 +6,18 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 DEFAULT_CONFIG = Path.home() / ".config/quickshell/performance/machine.json"
+LOCAL_STORAGE_KINDS = frozenset({"ssd", "hdd", "other"})
+
+
+@dataclass(frozen=True)
+class LocalStorageConfig:
+    label: str
+    path: Path
+    kind: str
 
 
 @dataclass(frozen=True)
@@ -35,6 +44,76 @@ DISABLED_MACHINE_CONFIG = MachineConfig(
 )
 
 
+def _load_config_object(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("machine config must be a JSON object")
+    return data
+
+
+def _local_storage(data: dict[str, Any]) -> tuple[LocalStorageConfig, ...]:
+    raw_volumes = data.get("local_storage", [])
+    if not isinstance(raw_volumes, list):
+        raise ValueError("machine config field 'local_storage' must be a list")
+
+    volumes: list[LocalStorageConfig] = []
+    labels: set[str] = set()
+    paths: set[Path] = set()
+    for index, raw_volume in enumerate(raw_volumes):
+        field = f"local_storage[{index}]"
+        if not isinstance(raw_volume, dict):
+            raise ValueError(f"machine config field '{field}' must be an object")
+
+        label = raw_volume.get("label")
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError(
+                f"machine config field '{field}.label' must be a non-empty string"
+            )
+        label = label.strip()
+
+        raw_path = raw_volume.get("path")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ValueError(
+                f"machine config field '{field}.path' must be an absolute path"
+            )
+        volume_path = Path(raw_path)
+        if not volume_path.is_absolute():
+            raise ValueError(
+                f"machine config field '{field}.path' must be an absolute path"
+            )
+        volume_path = volume_path.resolve(strict=False)
+        if volume_path == Path("/"):
+            raise ValueError(
+                f"machine config field '{field}.path' must not resolve to root"
+            )
+
+        kind = raw_volume.get("kind")
+        if kind not in LOCAL_STORAGE_KINDS:
+            raise ValueError(
+                f"machine config field '{field}.kind' must be one of "
+                "'ssd', 'hdd', or 'other'"
+            )
+        if label in labels:
+            raise ValueError("machine config local storage labels must be unique")
+        if volume_path in paths:
+            raise ValueError("machine config local storage paths must be unique")
+
+        labels.add(label)
+        paths.add(volume_path)
+        volumes.append(
+            LocalStorageConfig(label=label, path=volume_path, kind=kind)
+        )
+
+    return tuple(volumes)
+
+
+def load_local_storage(
+    path: Path = DEFAULT_CONFIG,
+) -> tuple[LocalStorageConfig, ...]:
+    """Load only local storage settings, independently of automation fields."""
+    return _local_storage(_load_config_object(path))
+
+
 def _brightness(data: dict[str, object], field: str) -> int:
     value = data.get(field)
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
@@ -43,9 +122,7 @@ def _brightness(data: dict[str, object], field: str) -> int:
 
 
 def load_machine_config(path: Path = DEFAULT_CONFIG) -> MachineConfig:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError("machine config must be a JSON object")
+    data = _load_config_object(path)
 
     automation_enabled = data.get("automation_enabled", False)
     if not isinstance(automation_enabled, bool):

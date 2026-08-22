@@ -9,8 +9,11 @@ import shutil
 import signal
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from machine_config import DEFAULT_CONFIG, LocalStorageConfig, load_local_storage
 
 
 HWMON_ROOT = Path("/sys/class/hwmon")
@@ -20,6 +23,15 @@ PCI_IDS = Path("/usr/share/hwdata/pci.ids")
 PROC_NET_ROUTE = Path("/proc/net/route")
 PROC_NET_DEV = Path("/proc/net/dev")
 PROC_UPTIME = Path("/proc/uptime")
+
+
+@dataclass(frozen=True)
+class AmdGpuDevice:
+    id: str
+    device: Path
+    hwmon: Path | None
+    display_connected: bool
+    model: str | None
 
 
 def read_text(path: Path) -> str | None:
@@ -46,18 +58,41 @@ def find_hwmon(name: str) -> Path | None:
     return None
 
 
-def find_amdgpu_device() -> Path | None:
-    for card in sorted(DRM_ROOT.glob("card*")):
+def find_amdgpu_devices() -> tuple[AmdGpuDevice, ...]:
+    devices: list[AmdGpuDevice] = []
+    for card in DRM_ROOT.glob("card*"):
         if not card.name.removeprefix("card").isdigit():
             continue
-        device = card / "device"
+        device_link = card / "device"
         try:
+            device = device_link.resolve(strict=True)
             driver = (device / "driver").resolve(strict=True).name
         except OSError:
             continue
-        if driver == "amdgpu":
-            return device
-    return None
+        if driver != "amdgpu":
+            continue
+
+        hwmon = None
+        for candidate in sorted((device / "hwmon").glob("hwmon*")):
+            if read_text(candidate / "name") == "amdgpu":
+                hwmon = candidate
+                break
+
+        display_connected = any(
+            read_text(connector / "status") == "connected"
+            for connector in DRM_ROOT.glob(f"{card.name}-*")
+        )
+        devices.append(
+            AmdGpuDevice(
+                id=device.name,
+                device=device,
+                hwmon=hwmon,
+                display_connected=display_connected,
+                model=read_pci_model(device),
+            )
+        )
+
+    return tuple(sorted(devices, key=lambda gpu: gpu.id))
 
 
 def read_cpu_model() -> str | None:
@@ -161,6 +196,36 @@ def read_storage() -> tuple[int | None, int | None]:
     except OSError:
         return None, None
     return usage.used, usage.total
+
+
+def read_storage_volumes(
+    volumes: tuple[LocalStorageConfig, ...],
+) -> list[dict[str, Any]]:
+    readings: list[dict[str, Any]] = []
+    for volume in volumes:
+        available = False
+        used: int | None = None
+        total: int | None = None
+        try:
+            if volume.path.is_mount():
+                usage = shutil.disk_usage(volume.path)
+                available = True
+                used = usage.used
+                total = usage.total
+        except OSError:
+            pass
+
+        readings.append(
+            {
+                "label": volume.label,
+                "kind": volume.kind,
+                "available": available,
+                "used_bytes": used,
+                "total_bytes": total,
+                "usage_percent": bytes_usage(used, total),
+            }
+        )
+    return readings
 
 
 def read_uptime_seconds() -> float | None:
@@ -270,14 +335,38 @@ def rapl_power_w(
     return round(watts, 1)
 
 
+def read_gpu(gpu: AmdGpuDevice) -> dict[str, Any]:
+    gpu_usage = read_int(gpu.device / "gpu_busy_percent")
+    vram_total = read_int(gpu.device / "mem_info_vram_total")
+    vram_used = read_int(gpu.device / "mem_info_vram_used")
+    return {
+        "id": gpu.id,
+        "display_connected": gpu.display_connected,
+        "runtime_status": read_text(gpu.device / "power/runtime_status"),
+        "model": gpu.model,
+        "usage_percent": float(gpu_usage) if gpu_usage is not None else None,
+        "temperature_c": temperature_c(
+            find_labeled_input(gpu.hwmon, "temp", "edge")
+        ),
+        "power_w": power_w(
+            find_labeled_input(gpu.hwmon, "power", "PPT", "average")
+        ),
+        "vram": {
+            "used_bytes": vram_used,
+            "total_bytes": vram_total,
+            "usage_percent": bytes_usage(vram_used, vram_total),
+        },
+    }
+
+
 def read_snapshot(
     previous_cpu: tuple[int, int],
     previous_energy: int | None,
     previous_network: tuple[str, int, int] | None,
     previous_time: float,
     cpu_hwmon: Path | None,
-    gpu_hwmon: Path | None,
-    gpu_device: Path | None,
+    gpu_devices: tuple[AmdGpuDevice, ...],
+    local_storage: tuple[LocalStorageConfig, ...],
 ) -> tuple[
     dict[str, Any],
     tuple[int, int],
@@ -304,22 +393,8 @@ def read_snapshot(
         if memory_total is not None and memory_available is not None
         else None
     )
-
-    gpu_usage = (
-        read_int(gpu_device / "gpu_busy_percent")
-        if gpu_device is not None
-        else None
-    )
-    vram_total = (
-        read_int(gpu_device / "mem_info_vram_total")
-        if gpu_device is not None
-        else None
-    )
-    vram_used = (
-        read_int(gpu_device / "mem_info_vram_used")
-        if gpu_device is not None
-        else None
-    )
+    gpus = [read_gpu(gpu) for gpu in gpu_devices]
+    primary_gpu = gpus[0] if gpus else None
 
     reading: dict[str, Any] = {
         "schema_version": 1,
@@ -339,30 +414,38 @@ def read_snapshot(
             ),
         },
         "gpu": {
-            "model": read_pci_model(gpu_device),
-            "usage_percent": float(gpu_usage) if gpu_usage is not None else None,
-            "temperature_c": temperature_c(
-                find_labeled_input(gpu_hwmon, "temp", "edge")
+            "model": primary_gpu["model"] if primary_gpu else None,
+            "usage_percent": (
+                primary_gpu["usage_percent"] if primary_gpu else None
             ),
-            "power_w": power_w(
-                find_labeled_input(gpu_hwmon, "power", "PPT", "average")
+            "temperature_c": (
+                primary_gpu["temperature_c"] if primary_gpu else None
             ),
+            "power_w": primary_gpu["power_w"] if primary_gpu else None,
         },
+        "gpus": gpus,
         "memory": {
             "used_bytes": memory_used,
             "total_bytes": memory_total,
             "usage_percent": bytes_usage(memory_used, memory_total),
         },
         "vram": {
-            "used_bytes": vram_used,
-            "total_bytes": vram_total,
-            "usage_percent": bytes_usage(vram_used, vram_total),
+            "used_bytes": (
+                primary_gpu["vram"]["used_bytes"] if primary_gpu else None
+            ),
+            "total_bytes": (
+                primary_gpu["vram"]["total_bytes"] if primary_gpu else None
+            ),
+            "usage_percent": (
+                primary_gpu["vram"]["usage_percent"] if primary_gpu else None
+            ),
         },
         "storage": {
             "used_bytes": storage_used,
             "total_bytes": storage_total,
             "usage_percent": bytes_usage(storage_used, storage_total),
         },
+        "storage_volumes": read_storage_volumes(local_storage),
         "network": {
             "interface": current_network[0] if current_network else None,
             "download_bytes_per_second": download_rate,
@@ -373,14 +456,29 @@ def read_snapshot(
     return reading, current_cpu, current_energy, current_network, now
 
 
-def stream(interval: float, once: bool) -> int:
+def stream(interval: float, once: bool, machine_config: Path) -> int:
     if interval <= 0:
         print("interval must be greater than zero", file=sys.stderr)
         return 2
 
     cpu_hwmon = find_hwmon("coretemp")
-    gpu_hwmon = find_hwmon("amdgpu")
-    gpu_device = find_amdgpu_device()
+    gpu_devices = find_amdgpu_devices()
+    try:
+        local_storage = load_local_storage(machine_config)
+    except FileNotFoundError:
+        print(
+            "system metrics warning: machine config not found; "
+            "extra storage disabled",
+            file=sys.stderr,
+        )
+        local_storage = ()
+    except (OSError, UnicodeError, ValueError):
+        print(
+            "system metrics warning: machine config could not be loaded; "
+            "extra storage disabled",
+            file=sys.stderr,
+        )
+        local_storage = ()
 
     try:
         previous_cpu = read_cpu_times()
@@ -416,8 +514,8 @@ def stream(interval: float, once: bool) -> int:
                 previous_network,
                 previous_time,
                 cpu_hwmon,
-                gpu_hwmon,
-                gpu_device,
+                gpu_devices,
+                local_storage,
             )
         except (OSError, ValueError) as error:
             print(f"system metrics failed: {error}", file=sys.stderr, flush=True)
@@ -439,8 +537,14 @@ def main() -> int:
         help="seconds between readings (default: 2)",
     )
     parser.add_argument("--once", action="store_true", help="print one reading")
+    parser.add_argument(
+        "--machine-config",
+        type=Path,
+        default=DEFAULT_CONFIG,
+        help="path to private machine settings",
+    )
     args = parser.parse_args()
-    return stream(args.interval, args.once)
+    return stream(args.interval, args.once, args.machine_config)
 
 
 if __name__ == "__main__":
