@@ -20,7 +20,7 @@ groups, not from their different content.
 
 - Square panels with no corner radius.
 - A restrained neutral border rather than a colored outline.
-- Segmented utilization bars and square status indicators.
+- Continuous square-ended utilization bars and square status indicators.
 - Current fonts, Material Symbols icons, per-metric colors, content order, and
   behavior.
 - Compact, legible information hierarchy with accurate status semantics.

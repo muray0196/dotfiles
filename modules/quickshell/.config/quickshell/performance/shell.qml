@@ -263,39 +263,20 @@ Scope {
 
         property real value: 0
         property color accent: "#7dcfff"
-        readonly property int segmentCount: 20
-        readonly property int segmentSpacing: 2
 
         implicitHeight: 7
         radius: 0
-        color: "transparent"
+        color: "#30f5f7ff"
 
-        Row {
-            anchors.fill: parent
-            spacing: usageBar.segmentSpacing
-
-            Repeater {
-                model: usageBar.segmentCount
-
-                delegate: Rectangle {
-                    required property int index
-
-                    width: (
-                        usageBar.width
-                        - (usageBar.segmentCount - 1) * usageBar.segmentSpacing
-                    ) / usageBar.segmentCount
-                    height: usageBar.height
-                    color: "#30f5f7ff"
-
-                    Rectangle {
-                        width: parent.width * Math.min(1, Math.max(0,
-                            (usageBar.value - index * 5) / 5
-                        ))
-                        height: parent.height
-                        color: usageBar.accent
-                    }
-                }
-            }
+        Rectangle {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: parent.width * Math.min(1, Math.max(0,
+                usageBar.value / 100
+            ))
+            radius: 0
+            color: usageBar.accent
         }
     }
 
