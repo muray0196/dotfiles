@@ -1,24 +1,30 @@
 import Quickshell
 import Quickshell.Io
 import QtQuick
+import "common" as UI
 
 Scope {
     id: shell
+
+    UI.Theme {
+        id: theme
+    }
 
     property int widgetWidth: 312
     property bool widgetsVisible: true
     readonly property string clockScriptsDir: Quickshell.shellDir + "/scripts"
     readonly property string clockConfigPath: Quickshell.shellDir + "/local.json"
-    readonly property color panelBackground: "#b5181822"
-    readonly property color panelEdgeLight: "#8a717683"
-    readonly property color panelEdgeDark: "#8a30333d"
-    readonly property color dividerColor: "#665c606b"
     readonly property int panelContentWidth: 280
     readonly property int panelTitleSize: 18
     readonly property int sectionTitleSize: 16
     readonly property int panelMetaSize: 11
     readonly property int panelGap: 10
+    readonly property int panelBottomInset: 10
+    readonly property int moduleDividerHeight: 7
+    readonly property int radarHeaderHeight: 31
     property var weekdayNames: ["日", "月", "火", "水", "木", "金", "土"]
+    readonly property var calendarWeekdayLabels:
+        ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
     property var holidayEntries: ({})
     property bool holidayDataAvailable: false
     property date calendarDate: new Date()
@@ -27,15 +33,67 @@ Scope {
     property int currentDay: calendarDate.getDate()
     property int currentWeekday: calendarDate.getDay()
     property string currentDateKey: dateKey(currentYear, currentMonth, currentDay)
-    property string currentDateLabel: currentYear + "年" + currentMonth + "月"
-        + currentDay + "日（" + weekdayNames[currentWeekday] + "）"
+    property string currentDateLabel: currentYear + " / "
+        + padded(currentMonth) + " / " + padded(currentDay) + " · "
+        + calendarWeekdayLabels[currentWeekday]
+    property string currentTimeZoneAbbreviation: ""
+    readonly property string currentTimeZoneLabel:
+        (currentTimeZoneAbbreviation !== ""
+            ? currentTimeZoneAbbreviation + " · " : "")
+        + utcOffsetLabel(clock.date)
+    readonly property int currentIsoWeek: isoWeekNumber(calendarDate)
+    readonly property int currentDayOfYear: dayOfYear(calendarDate)
+    readonly property int currentYearLength: daysInYear(currentYear)
+    readonly property var nextHolidaySummary: nextHolidayDetails()
 
     function padded(value) {
         return value < 10 ? "0" + value : value.toString();
     }
 
+    function utcOffsetLabel(date) {
+        const totalMinutes = -date.getTimezoneOffset();
+        const sign = totalMinutes >= 0 ? "+" : "−";
+        const absoluteMinutes = Math.abs(totalMinutes);
+        const hours = Math.floor(absoluteMinutes / 60);
+        const minutes = absoluteMinutes % 60;
+        return "UTC" + sign + padded(hours)
+            + (minutes === 0 ? "" : ":" + padded(minutes));
+    }
+
     function dateKey(year, month, day) {
         return year + "-" + padded(month) + "-" + padded(day);
+    }
+
+    function dayOfYear(date) {
+        const start = Date.UTC(date.getFullYear(), 0, 1);
+        const current = Date.UTC(
+            date.getFullYear(), date.getMonth(), date.getDate()
+        );
+        return Math.floor((current - start) / 86400000) + 1;
+    }
+
+    function daysInYear(year) {
+        return new Date(year, 1, 29).getMonth() === 1 ? 366 : 365;
+    }
+
+    function isoWeekNumber(date) {
+        const target = new Date(Date.UTC(
+            date.getFullYear(), date.getMonth(), date.getDate()
+        ));
+        const weekday = target.getUTCDay() || 7;
+        target.setUTCDate(target.getUTCDate() + 4 - weekday);
+        const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+        return Math.ceil(((target - yearStart) / 86400000 + 1) / 7);
+    }
+
+    function daysUntilDateKey(key) {
+        const target = Date.UTC(
+            Number(key.slice(0, 4)),
+            Number(key.slice(5, 7)) - 1,
+            Number(key.slice(8, 10))
+        );
+        const current = Date.UTC(currentYear, currentMonth - 1, currentDay);
+        return Math.round((target - current) / 86400000);
     }
 
     function millisecondsUntilNextDay() {
@@ -144,84 +202,187 @@ Scope {
 
     function calendarDayColor(cell) {
         if (cell.holiday !== "" || cell.weekday === 0)
-            return "#efa0ad";
+            return theme.calendarSundayHoliday;
         if (cell.weekday === 6)
-            return "#9bd7ff";
-        return "#f5f7ff";
+            return theme.calendarSaturday;
+        return theme.textPrimary;
     }
 
-    function nextHolidayText() {
-        if (!holidayDataAvailable)
-            return "祝日データ未取得";
+    function nextHolidayDetails() {
+        if (!holidayDataAvailable) {
+            return {
+                label: "HOLIDAY DATA",
+                value: "NO DATA",
+                countdown: "",
+                known: false
+            };
+        }
 
         const dates = Object.keys(holidayEntries).sort();
         for (const key of dates) {
             if (key < currentDateKey)
                 continue;
-            if (key === currentDateKey)
-                return "今日　" + holidayEntries[key];
+            if (key === currentDateKey) {
+                return {
+                    label: "HOLIDAY TODAY",
+                    value: holidayEntries[key],
+                    countdown: "",
+                    known: true
+                };
+            }
 
             const month = Number(key.slice(5, 7));
             const day = Number(key.slice(8, 10));
-            return "次の祝日　" + month + "/" + day + " " + holidayEntries[key];
+            return {
+                label: "NEXT HOLIDAY",
+                value: padded(month) + "/" + padded(day)
+                    + " " + holidayEntries[key],
+                countdown: "IN " + daysUntilDateKey(key) + "D",
+                known: true
+            };
         }
-        return "次の祝日　未掲載";
+        return {
+            label: "NEXT HOLIDAY",
+            value: "UNLISTED",
+            countdown: "",
+            known: true
+        };
     }
 
-    component IconCaption: Item {
-        property string symbol: ""
-        property string caption: ""
-        property string changeCaption: ""
-        property int symbolSize: 21
-        property int captionSize: 15
-        property int changeSize: 12
-        property color symbolColor: "#c7cad5"
-        property color captionColor: "#c7cad5"
-        property color changeColor: "#aeb3c2"
+    component StatusMarker: Row {
+        required property string label
+        required property color tone
 
-        implicitWidth: iconRow.implicitWidth
-        implicitHeight: iconRow.implicitHeight
+        spacing: 5
 
-        Row {
-            id: iconRow
-            anchors.centerIn: parent
-            spacing: 4
+        Rectangle {
+            anchors.verticalCenter: parent.verticalCenter
+            width: 8
+            height: 8
+            radius: 0
+            color: tone
+        }
+
+        Text {
+            text: label
+            color: tone
+            font.family: "Adwaita Mono"
+            font.pixelSize: 11
+            font.weight: Font.Medium
+        }
+    }
+
+    component ModuleHeaderRail: Rectangle {
+        required property color tone
+
+        width: 3
+        height: 18
+        radius: 0
+        color: tone
+    }
+
+    component EnvironmentMetric: Column {
+        required property string label
+        required property string value
+        property string comparison: ""
+        property bool reserveComparisonSpace: true
+        property color valueColor: theme.textPrimary
+
+        spacing: -1
+
+        Item {
+            width: parent.width
+            height: 11
 
             Text {
-                text: symbol
-                color: symbolColor
-                font.family: "Material Symbols Rounded"
-                font.pixelSize: symbolSize
-                font.weight: Font.Normal
+                anchors.centerIn: parent
+                text: label
+                color: theme.textMuted
+                font.family: "Adwaita Mono"
+                font.pixelSize: 9
+                font.weight: Font.Medium
             }
+        }
+
+        Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            text: value
+            color: valueColor
+            font.family: "Adwaita Sans"
+            font.pixelSize: 25
+            font.weight: Font.Normal
+        }
+
+        Item {
+            width: parent.width
+            height: 13
+            visible: reserveComparisonSpace || comparison !== ""
 
             Text {
-                id: captionText
-                text: caption
-                color: captionColor
-                font.family: "Noto Sans JP"
-                font.pixelSize: captionSize
+                anchors.centerIn: parent
+                text: comparison
+                color: theme.textMuted
+                font.family: "Adwaita Mono"
+                font.pixelSize: 10
                 font.weight: Font.Normal
             }
+        }
+    }
 
-            Item {
-                visible: changeCaption !== ""
-                width: changeText.implicitWidth
-                height: captionText.implicitHeight
+    component ModuleDivider: Item {
+        property real lineOffsetY: 0
 
-                Text {
-                    id: changeText
-                    anchors {
-                        top: parent.top
-                        topMargin: 1
-                    }
-                    text: changeCaption
-                    color: changeColor
-                    font.family: "Noto Sans JP"
-                    font.pixelSize: changeSize
-                    font.weight: Font.Medium
-                }
+        implicitHeight: shell.moduleDividerHeight
+
+        Rectangle {
+            anchors {
+                horizontalCenter: parent.horizontalCenter
+                verticalCenter: parent.verticalCenter
+                verticalCenterOffset: lineOffsetY
             }
+            width: parent.width
+            height: 1
+            color: theme.divider
+        }
+    }
+
+    component ModuleFooterRow: Item {
+        required property string fieldLabel
+        required property string fieldValue
+        property color valueTone: theme.textSecondary
+
+        implicitHeight: Math.max(19, footerValue.implicitHeight)
+        height: implicitHeight
+
+        Text {
+            id: footerLabel
+            anchors {
+                left: parent.left
+                verticalCenter: parent.verticalCenter
+            }
+            text: fieldLabel
+            color: theme.textMuted
+            font.family: "Adwaita Mono"
+            font.pixelSize: theme.moduleFooterLabelSize
+            font.weight: Font.Medium
+        }
+
+        Text {
+            id: footerValue
+            anchors {
+                left: footerLabel.right
+                leftMargin: 8
+                right: parent.right
+                verticalCenter: parent.verticalCenter
+            }
+            horizontalAlignment: Text.AlignRight
+            text: fieldValue
+            color: valueTone
+            font.family: "Noto Sans JP"
+            font.pixelSize: theme.moduleFooterValueSize
+            font.weight: Font.Normal
+            wrapMode: Text.Wrap
         }
     }
 
@@ -307,7 +468,21 @@ Scope {
 
     property real temperature: 0
     property int humidity: 0
+    property int sensorBattery: -1
+    property int sensorRssi: 0
     property bool sensorAvailable: false
+    property bool sensorFresh: false
+    property double sensorLastUpdateMs: 0
+    readonly property string sensorObservedAt: sensorAvailable
+            && sensorLastUpdateMs > 0
+        ? Qt.formatDateTime(new Date(sensorLastUpdateMs), "HH:mm") : ""
+    readonly property string sensorLinkSummary:
+        (sensorBattery >= 0 ? "BAT " + sensorBattery + "%" : "BAT --")
+        + " · "
+        + (sensorRssi !== 0
+            ? "RSSI " + (sensorRssi < 0 ? "−" + Math.abs(sensorRssi)
+                : sensorRssi)
+            : "RSSI --")
     property string weatherObservedAt: ""
     property string weatherState: "unknown"
     property string weatherCondition: ""
@@ -319,6 +494,29 @@ Scope {
     property bool weatherFetchPending: false
     property bool weatherFetchFailed: false
     property bool weatherUpdateReceived: false
+    property bool weatherFresh: false
+    property double weatherLastUpdateMs: 0
+    readonly property bool indoorSourceCurrent: sensorAvailable && sensorFresh
+    readonly property bool outdoorSourceCurrent: weatherAvailable
+        && weatherFresh && !weatherFetchFailed
+    readonly property int currentEnvironmentSourceCount:
+        (indoorSourceCurrent ? 1 : 0) + (outdoorSourceCurrent ? 1 : 0)
+    readonly property string indoorSourceState: indoorSourceCurrent
+        ? "LIVE" : sensorAvailable ? "STALE" : "NO DATA"
+    readonly property color indoorSourceTone: indoorSourceCurrent
+        ? theme.textSecondary
+        : sensorAvailable ? theme.statusCaution : theme.statusUnknown
+    readonly property string outdoorSourceState: outdoorSourceCurrent
+        ? "LIVE" : weatherAvailable ? "CACHED"
+        : weatherFetchFailed ? "ERROR" : "FETCHING"
+    readonly property color outdoorSourceTone: outdoorSourceCurrent
+        ? theme.textSecondary : weatherAvailable ? theme.statusCaution
+        : weatherFetchFailed ? theme.statusError : theme.statusUnknown
+    readonly property color environmentSourceTone:
+        currentEnvironmentSourceCount === 2 ? theme.statusOk
+        : currentEnvironmentSourceCount === 1 ? theme.statusCaution
+        : sensorAvailable || weatherAvailable ? theme.statusCaution
+        : weatherFetchFailed ? theme.statusError : theme.statusUnknown
     property var radarFrameSetA: []
     property var radarFrameSetB: []
     property int radarActiveSet: -1
@@ -347,6 +545,30 @@ Scope {
     property bool radarFetchFailed: false
     property bool radarIncludeAnimationFrames: false
     property bool radarUpdateReceived: false
+    readonly property int radarMinimumViewportHeight: 192
+    readonly property int radarViewportHeight: Math.max(
+        radarMinimumViewportHeight,
+        Math.round(radarWindow.height) - panelBottomInset * 2
+            - radarHeaderHeight - moduleDividerHeight
+    )
+    readonly property int radarViewWidthKm: radarAvailable
+        ? Math.round(panelContentWidth * radarMetersPerPixel / 1000) : 0
+    readonly property int radarViewHeightKm: radarAvailable
+        ? Math.round(radarViewportHeight * radarMetersPerPixel / 1000) : 0
+    readonly property string radarViewSummary: radarAvailable
+        ? "VIEW " + radarViewWidthKm + "×"
+            + radarViewHeightKm + " KM"
+        : "VIEW --"
+    readonly property string radarPlaybackMode: radarAvailable
+            && radarActiveFrames.length > 1
+        ? "LOOP 1.6S" : "STATIC"
+    readonly property bool radarSourceCurrent:
+        radarAvailable && !radarFetchFailed
+    readonly property color radarSourceTone: radarSourceCurrent
+        ? theme.statusOk : radarAvailable ? theme.statusCaution
+        : radarFetchFailed ? theme.statusError : theme.statusUnknown
+    readonly property string radarFrameStatusText: radarAvailable
+        ? radarFrameLabel() : radarFetchFailed ? "NO FRAME" : "WAITING FOR FRAME"
 
     function weatherSymbol(state) {
         switch (state) {
@@ -374,24 +596,24 @@ Scope {
 
     function weatherColor(state) {
         if (state === "thunder" || state === "storm")
-            return "#ffd166";
+            return theme.weatherThunder;
         if (state === "snow" || state === "blizzard")
-            return "#dff6ff";
+            return theme.weatherSnow;
         if (state === "sleet")
-            return "#b9e8ff";
+            return theme.weatherSleet;
         if (state === "light_rain")
-            return "#9bd7ff";
+            return theme.weatherLightRain;
         if (state === "rain")
-            return "#78c8ff";
+            return theme.weatherRain;
         if (state === "fog")
-            return "#d4d8e3";
+            return theme.weatherFog;
         if (state === "extreme_heat")
-            return "#ff9f43";
+            return theme.weatherExtremeHeat;
         if (state === "sunny")
-            return "#ffd166";
+            return theme.weatherSunny;
         if (state === "cloudy")
-            return "#d9dde8";
-        return "#f5f7ff";
+            return theme.weatherCloudy;
+        return theme.weatherUnknown;
     }
 
     function forecastDisplayState(forecast) {
@@ -421,20 +643,20 @@ Scope {
 
     function precipitationColor(value) {
         if (value < 1)
-            return "#f5f7ff";
+            return theme.precipitationTrace;
         if (value < 5)
-            return "#a0d2ff";
+            return theme.precipitationLight;
         if (value < 10)
-            return "#4d9cff";
+            return theme.precipitationModerate;
         if (value < 20)
-            return "#718cff";
+            return theme.precipitationHeavy;
         if (value < 30)
-            return "#e8df45";
+            return theme.precipitationVeryHeavy;
         if (value < 50)
-            return "#ff9e3d";
+            return theme.precipitationIntense;
         if (value < 80)
-            return "#ff5c4a";
-        return "#e65aa5";
+            return theme.precipitationSevere;
+        return theme.precipitationExtreme;
     }
 
     function differenceValue(indoor, outdoor, decimals) {
@@ -450,25 +672,24 @@ Scope {
         return (difference > 0 ? "+" : "−") + magnitude;
     }
 
-    function differenceColor(indoor, outdoor, decimals) {
-        const difference = differenceValue(indoor, outdoor, decimals);
-        if (difference > 0)
-            return "#9ece6a";
-        if (difference < 0)
-            return "#f7768e";
-        return "#aeb3c2";
-    }
-
     function updateSensor(line) {
         try {
             const reading = JSON.parse(line);
             if (typeof reading.temperature !== "number"
-                    || typeof reading.humidity !== "number")
+                    || typeof reading.humidity !== "number"
+                    || typeof reading.timestamp !== "number")
                 return;
 
             temperature = reading.temperature;
             humidity = reading.humidity;
+            sensorBattery = typeof reading.battery === "number"
+                    && reading.battery >= 0 && reading.battery <= 100
+                ? Math.round(reading.battery) : -1;
+            sensorRssi = typeof reading.rssi === "number"
+                ? Math.round(reading.rssi) : 0;
+            sensorLastUpdateMs = reading.timestamp * 1000;
             sensorAvailable = true;
+            sensorFresh = true;
         } catch (error) {
             console.warn("Invalid SwitchBot reading:", error);
         }
@@ -527,6 +748,8 @@ Scope {
                 : "";
             weatherUpdateReceived = true;
             weatherAvailable = true;
+            weatherFresh = true;
+            weatherLastUpdateMs = Date.now();
             weatherFetchFailed = false;
             syncRadarAnimation(true);
             if (wasRaining !== observedWeatherIsRain())
@@ -572,11 +795,17 @@ Scope {
     function radarFrameLabel() {
         if (!radarAvailable || radarDisplayedFrame === null)
             return "";
-        if (radarFrameForecast)
-            return radarFrameOffset + "分後予測 · " + radarFrameAt;
-        if (radarFrameOffset < 0)
-            return Math.abs(radarFrameOffset) + "分前 · " + radarFrameAt;
-        return "最新 · " + radarFrameAt;
+        return (radarFrameForecast ? "FCST" : "OBS") + " "
+            + radarFrameAt + " · " + (radarFrameIndex + 1) + "/"
+            + radarActiveFrames.length;
+    }
+
+    function radarTimelineLabel(frame) {
+        if (frame.forecast)
+            return "+" + frame.offsetMinutes + " FCST";
+        if (frame.offsetMinutes < 0)
+            return frame.offsetMinutes + " OBS";
+        return "NOW";
     }
 
     function radarFramesAddInformation(candidateFrames, existingFrames) {
@@ -773,7 +1002,7 @@ Scope {
                 right: parent.right
             }
             height: 1
-            color: shell.panelEdgeLight
+            color: theme.panelEdgeLight
         }
 
         Rectangle {
@@ -783,7 +1012,7 @@ Scope {
                 left: parent.left
             }
             width: 1
-            color: shell.panelEdgeLight
+            color: theme.panelEdgeLight
         }
 
         Rectangle {
@@ -793,7 +1022,7 @@ Scope {
                 bottom: parent.bottom
             }
             height: 1
-            color: shell.panelEdgeDark
+            color: theme.panelEdgeDark
         }
 
         Rectangle {
@@ -803,7 +1032,7 @@ Scope {
                 bottom: parent.bottom
             }
             width: 1
-            color: shell.panelEdgeDark
+            color: theme.panelEdgeDark
         }
     }
 
@@ -830,26 +1059,84 @@ Scope {
         Rectangle {
             anchors.fill: parent
             radius: 0
-            color: shell.panelBackground
+            color: theme.panelBackground
             border.width: 0
 
             PanelEdge {
                 anchors.fill: parent
             }
 
+            Item {
+                anchors {
+                    top: parent.top
+                    topMargin: 10
+                    horizontalCenter: parent.horizontalCenter
+                }
+                width: shell.panelContentWidth
+                height: 24
+
+                ModuleHeaderRail {
+                    anchors {
+                        left: parent.left
+                        verticalCenter: parent.verticalCenter
+                    }
+                    tone: theme.clockHeaderAccent
+                }
+
+                Text {
+                    anchors {
+                        left: parent.left
+                        leftMargin: 10
+                        verticalCenter: parent.verticalCenter
+                    }
+                    text: "LOCAL TIME"
+                    color: theme.textPrimary
+                    font.family: "Adwaita Mono"
+                    font.pixelSize: 17
+                    font.weight: Font.Medium
+                }
+
+                Text {
+                    anchors {
+                        right: parent.right
+                        verticalCenter: parent.verticalCenter
+                    }
+                    text: shell.currentTimeZoneLabel
+                    color: theme.textMuted
+                    font.family: "Adwaita Mono"
+                    font.pixelSize: 9
+                    font.weight: Font.Medium
+                }
+            }
+
+            ModuleDivider {
+                anchors {
+                    top: parent.top
+                    topMargin: 34
+                    horizontalCenter: parent.horizontalCenter
+                }
+                width: shell.panelContentWidth
+                height: implicitHeight
+            }
+
             Column {
                 id: clockContent
-                anchors.centerIn: parent
+                anchors {
+                    bottom: parent.bottom
+                    bottomMargin: shell.panelBottomInset
+                    horizontalCenter: parent.horizontalCenter
+                }
                 spacing: -2
 
                 Row {
                     id: timeRow
                     spacing: 8
+                    transform: Translate { y: 8 }
 
                     Text {
                         id: hourText
                         text: Qt.formatDateTime(clock.date, "HH")
-                        color: "#f5f7ff"
+                        color: theme.textPrimary
                         font.family: "Adwaita Mono"
                         font.pixelSize: 90
                         font.weight: Font.Normal
@@ -863,7 +1150,7 @@ Scope {
                             width: 8
                             height: 8
                             radius: 0
-                            color: "#f5f7ff"
+                            color: theme.textPrimary
                             anchors {
                                 horizontalCenter: parent.horizontalCenter
                                 verticalCenter: parent.verticalCenter
@@ -875,7 +1162,7 @@ Scope {
                             width: 8
                             height: 8
                             radius: 0
-                            color: "#f5f7ff"
+                            color: theme.textPrimary
                             anchors {
                                 horizontalCenter: parent.horizontalCenter
                                 verticalCenter: parent.verticalCenter
@@ -892,7 +1179,7 @@ Scope {
                             id: minuteText
                             anchors.left: parent.left
                             text: Qt.formatDateTime(clock.date, "mm")
-                            color: "#f5f7ff"
+                            color: theme.textPrimary
                             font.family: "Adwaita Mono"
                             font.pixelSize: 90
                             font.weight: Font.Normal
@@ -906,7 +1193,7 @@ Scope {
                                 baseline: minuteText.baseline
                             }
                             text: Qt.formatDateTime(clock.date, "ss")
-                            color: "#f5f7ff"
+                            color: theme.textPrimary
                             font.family: "Adwaita Mono"
                             font.pixelSize: 32
                             font.weight: Font.Normal
@@ -918,8 +1205,8 @@ Scope {
                     width: timeRow.width
                     horizontalAlignment: Text.AlignHCenter
                     text: shell.currentDateLabel
-                    color: "#f5f7ff"
-                    font.family: "Noto Sans JP"
+                    color: theme.textPrimary
+                    font.family: "Adwaita Mono"
                     font.pixelSize: 18
                     font.weight: Font.Normal
                 }
@@ -951,7 +1238,7 @@ Scope {
         Rectangle {
             anchors.fill: parent
             radius: 0
-            color: shell.panelBackground
+            color: theme.panelBackground
             border.width: 0
 
             PanelEdge {
@@ -960,100 +1247,232 @@ Scope {
 
             Column {
                 id: calendarContent
-                anchors.centerIn: parent
-                width: shell.panelContentWidth
-                spacing: 4
-
-                Text {
-                    width: parent.width
-                    horizontalAlignment: Text.AlignHCenter
-                    text: shell.currentYear + "年" + shell.currentMonth + "月"
-                    color: "#f5f7ff"
-                    font.family: "Noto Sans JP"
-                    font.pixelSize: shell.panelTitleSize
-                    font.weight: Font.Medium
+                anchors {
+                    bottom: parent.bottom
+                    bottomMargin: shell.panelBottomInset
+                    horizontalCenter: parent.horizontalCenter
                 }
+                width: shell.panelContentWidth
+                spacing: 0
 
-                Row {
+                Item {
                     width: parent.width
+                    height: 31
 
-                    Repeater {
-                        model: shell.weekdayNames
+                    ModuleHeaderRail {
+                        anchors {
+                            left: parent.left
+                            verticalCenter: parent.verticalCenter
+                            verticalCenterOffset: -6
+                        }
+                        tone: theme.calendarHeaderAccent
+                    }
 
-                        delegate: Text {
-                            required property int index
-                            required property string modelData
+                    Text {
+                        anchors {
+                            left: parent.left
+                            leftMargin: 10
+                            verticalCenter: parent.verticalCenter
+                            verticalCenterOffset: -6
+                        }
+                        text: "CALENDAR"
+                        color: theme.textPrimary
+                        font.family: "Adwaita Mono"
+                        font.pixelSize: 17
+                        font.weight: Font.Medium
+                    }
 
-                            width: calendarContent.width / 7
-                            horizontalAlignment: Text.AlignHCenter
-                            text: modelData
-                            color: index === 0 ? "#efa0ad"
-                                : index === 6 ? "#9bd7ff"
-                                : "#c7cad5"
-                            font.family: "Noto Sans JP"
-                            font.pixelSize: 13
+                    Column {
+                        anchors {
+                            right: parent.right
+                            verticalCenter: parent.verticalCenter
+                            verticalCenterOffset: -6
+                        }
+                        width: 150
+                        spacing: -1
+
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignRight
+                            text: shell.currentYear + " / "
+                                + shell.padded(shell.currentMonth)
+                            color: theme.textSecondary
+                            font.family: "Adwaita Mono"
+                            font.pixelSize: 11
                             font.weight: Font.Medium
                         }
+
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignRight
+                            text: "ISO W" + shell.currentIsoWeek + " · DAY "
+                                + shell.currentDayOfYear + "/"
+                                + shell.currentYearLength
+                            color: theme.textMuted
+                            font.family: "Adwaita Mono"
+                            font.pixelSize: 9
+                            font.weight: Font.Normal
+                        }
                     }
                 }
 
-                Rectangle {
+                ModuleDivider {
                     width: parent.width
-                    height: 1
-                    color: shell.dividerColor
+                    lineOffsetY: -8
                 }
 
-                Grid {
-                    id: calendarGrid
-
-                    property var cells: shell.calendarCells()
-                    property int weekCount: Math.ceil(cells.length / 7)
-
+                Item {
                     width: parent.width
-                    height: weekCount * 26 + Math.max(0, weekCount - 1) * rowSpacing
-                    columns: 7
-                    rowSpacing: 1
+                    height: 19
 
-                    Repeater {
-                        model: calendarGrid.cells
+                    Row {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width
 
-                        delegate: Item {
-                            required property var modelData
+                        Repeater {
+                            model: shell.calendarWeekdayLabels
 
-                            width: calendarContent.width / 7
-                            height: 26
+                            delegate: Text {
+                                required property int index
+                                required property string modelData
 
-                            Rectangle {
-                                anchors.centerIn: parent
-                                visible: modelData.isToday
-                                width: 26
-                                height: 26
-                                radius: 0
-                                color: "#55f5f7ff"
+                                width: calendarContent.width / 7
+                                horizontalAlignment: Text.AlignHCenter
+                                text: modelData
+                                color: index === 0
+                                    ? theme.calendarSundayHoliday
+                                    : index === 6 ? theme.calendarSaturday
+                                    : theme.textSecondary
+                                font.family: "Adwaita Mono"
+                                font.pixelSize: 10
+                                font.weight: Font.Medium
                             }
+                        }
+                    }
 
-                            Text {
-                                anchors.centerIn: parent
-                                visible: modelData.day > 0
-                                text: modelData.day
-                                color: shell.calendarDayColor(modelData)
-                                font.family: "Adwaita Sans"
-                                font.pixelSize: 15
-                                font.weight: modelData.isToday
-                                    ? Font.Medium : Font.Normal
+                    Item {
+                        anchors.fill: parent
+                        z: 1
+
+                        Repeater {
+                            model: 8
+
+                            delegate: Rectangle {
+                                required property int index
+
+                                x: index === 7
+                                    ? parent.width - 1
+                                    : Math.round(index * parent.width / 7)
+                                width: 1
+                                height: parent.height
+                                color: theme.calendarGridVertical
                             }
                         }
                     }
                 }
 
-                Text {
+                ModuleDivider {
                     width: parent.width
-                    horizontalAlignment: Text.AlignHCenter
-                    text: shell.nextHolidayText()
-                    color: "#c7cad5"
-                    font.family: "Noto Sans JP"
-                    font.pixelSize: 13
-                    font.weight: Font.Normal
+                }
+
+                Item {
+                    id: calendarGridFrame
+
+                    width: parent.width
+                    height: calendarGrid.height
+
+                    Grid {
+                        id: calendarGrid
+
+                        property var cells: shell.calendarCells()
+                        property int weekCount: Math.ceil(cells.length / 7)
+                        property int cellHeight: 26
+
+                        width: parent.width
+                        height: weekCount * cellHeight
+                            + Math.max(0, weekCount - 1) * rowSpacing
+                        columns: 7
+                        rowSpacing: 1
+
+                        Repeater {
+                            model: calendarGrid.cells
+
+                            delegate: Item {
+                                required property var modelData
+
+                                width: calendarContent.width / 7
+                                height: calendarGrid.cellHeight
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    visible: modelData.isToday
+                                    radius: 0
+                                    color: theme.calendarTodayFill
+                                }
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: modelData.day > 0
+                                    text: modelData.day
+                                    color: shell.calendarDayColor(modelData)
+                                    font.family: "Adwaita Sans"
+                                    font.pixelSize: 15
+                                    font.weight: modelData.isToday
+                                        ? Font.Medium : Font.Normal
+                                }
+                            }
+                        }
+                    }
+
+                    Item {
+                        anchors.fill: parent
+                        z: 1
+
+                        Repeater {
+                            model: 8
+
+                            delegate: Rectangle {
+                                required property int index
+
+                                x: index === 7
+                                    ? parent.width - 1
+                                    : Math.round(index * parent.width / 7)
+                                width: 1
+                                height: parent.height
+                                color: theme.calendarGridVertical
+                            }
+                        }
+
+                        Repeater {
+                            model: calendarGrid.weekCount
+
+                            delegate: Rectangle {
+                                required property int index
+
+                                y: index === 0 ? 0
+                                    : index * (calendarGrid.cellHeight
+                                        + calendarGrid.rowSpacing) - 1
+                                width: parent.width
+                                height: 1
+                                color: theme.calendarGridHorizontal
+                            }
+                        }
+                    }
+                }
+
+                ModuleDivider {
+                    width: parent.width
+                }
+
+                ModuleFooterRow {
+                    width: parent.width
+                    fieldLabel: shell.nextHolidaySummary.label
+                    fieldValue: shell.nextHolidaySummary.value
+                        + (shell.nextHolidaySummary.countdown !== ""
+                            ? " · " + shell.nextHolidaySummary.countdown
+                            : "")
+                    valueTone: shell.nextHolidaySummary.known
+                        ? theme.textSecondary : theme.textDisabled
                 }
             }
         }
@@ -1083,7 +1502,7 @@ Scope {
         Rectangle {
             anchors.fill: parent
             radius: 0
-            color: shell.panelBackground
+            color: theme.panelBackground
             border.width: 0
 
             PanelEdge {
@@ -1092,169 +1511,304 @@ Scope {
 
             Column {
                 id: weatherContent
-                anchors.centerIn: parent
+                anchors {
+                    bottom: parent.bottom
+                    bottomMargin: shell.panelBottomInset
+                    horizontalCenter: parent.horizontalCenter
+                }
                 width: shell.panelContentWidth
-                spacing: 3
-
-                Text {
-                    id: indoorLabel
-                    width: parent.width
-                    horizontalAlignment: Text.AlignLeft
-                    text: "室内"
-                    color: "#f5f7ff"
-                    font.family: "Noto Sans JP"
-                    font.pixelSize: shell.sectionTitleSize
-                    font.weight: Font.Medium
-                }
-
-                Row {
-                    width: parent.width
-                    spacing: 20
-
-                    IconCaption {
-                        width: (parent.width - 20) / 2
-                        symbol: "\uf076"
-                        caption: shell.sensorAvailable
-                            ? shell.temperature.toFixed(1) + "°C"
-                            : "--.-°C"
-                        changeCaption: shell.sensorAvailable && shell.weatherAvailable
-                            ? shell.differenceText(
-                                shell.temperature,
-                                shell.weatherTemperature,
-                                1
-                            )
-                            : ""
-                        changeColor: shell.differenceColor(
-                            shell.temperature,
-                            shell.weatherTemperature,
-                            1
-                        )
-                        symbolSize: 22
-                        captionSize: 26
-                    }
-
-                    IconCaption {
-                        width: (parent.width - 20) / 2
-                        symbol: "\uf87e"
-                        caption: shell.sensorAvailable
-                            ? shell.humidity + "%"
-                            : "--%"
-                        changeCaption: shell.sensorAvailable && shell.weatherAvailable
-                            ? shell.differenceText(
-                                shell.humidity,
-                                shell.weatherHumidity,
-                                0
-                            )
-                            : ""
-                        changeColor: shell.differenceColor(
-                            shell.humidity,
-                            shell.weatherHumidity,
-                            0
-                        )
-                        symbolSize: 22
-                        captionSize: 26
-                    }
-                }
+                spacing: 0
 
                 Item {
                     width: parent.width
-                    height: 15
+                    height: 24
 
-                    Rectangle {
-                        anchors.centerIn: parent
-                        width: parent.width
-                        height: 1
-                        color: shell.dividerColor
-                    }
-                }
-
-                Item {
-                    width: parent.width
-                    height: Math.max(
-                        outdoorLabel.implicitHeight,
-                        weatherObservedTime.implicitHeight
-                    )
-
-                    Text {
-                        id: outdoorLabel
+                    ModuleHeaderRail {
                         anchors {
                             left: parent.left
                             verticalCenter: parent.verticalCenter
                         }
-                        text: "屋外"
-                        color: "#f5f7ff"
-                        font.family: "Noto Sans JP"
-                        font.pixelSize: shell.sectionTitleSize
+                        tone: shell.environmentSourceTone
+                    }
+
+                    Text {
+                        anchors {
+                            left: parent.left
+                            leftMargin: 10
+                            verticalCenter: parent.verticalCenter
+                        }
+                        text: "ENVIRONMENT"
+                        color: theme.textPrimary
+                        font.family: "Adwaita Mono"
+                        font.pixelSize: 17
                         font.weight: Font.Medium
                     }
 
                     Text {
-                        id: weatherObservedTime
                         anchors {
                             right: parent.right
                             verticalCenter: parent.verticalCenter
                         }
-                        visible: shell.weatherAvailable
-                        text: shell.weatherObservedAt + "観測"
-                        color: "#aeb3c2"
-                        font.family: "Noto Sans JP"
-                        font.pixelSize: shell.panelMetaSize
-                        font.weight: Font.Normal
+                        text: "BLE · WEATHERNEWS"
+                        color: theme.textMuted
+                        font.family: "Adwaita Mono"
+                        font.pixelSize: 9
+                        font.weight: Font.Medium
                     }
                 }
 
-                IconCaption {
+                ModuleDivider {
                     width: parent.width
-                    symbol: shell.weatherAvailable
-                        ? shell.weatherSymbol(shell.weatherState)
-                        : "\uf172"
-                    caption: shell.weatherAvailable
-                        ? shell.weatherCondition
-                        : shell.weatherFetchFailed ? "取得失敗" : "取得中…"
-                    symbolSize: 30
-                    captionSize: 20
-                    symbolColor: shell.weatherAvailable
-                        ? shell.weatherColor(shell.weatherState)
-                        : "#f5f7ff"
-                    captionColor: "#f5f7ff"
-                }
-
-                Row {
-                    width: parent.width
-                    visible: shell.weatherAvailable
-                    spacing: 20
-
-                    IconCaption {
-                        width: (weatherContent.width - 20) / 2
-                        symbol: "\uf076"
-                        caption: shell.weatherTemperature.toFixed(1) + "°C"
-                        symbolSize: 22
-                        captionSize: 26
-                    }
-
-                    IconCaption {
-                        width: (weatherContent.width - 20) / 2
-                        symbol: "\uf87e"
-                        caption: shell.weatherHumidity + "%"
-                        symbolSize: 22
-                        captionSize: 26
-                    }
                 }
 
                 Column {
                     width: parent.width
-                    visible: shell.hourlyForecast.length > 0
-                    spacing: 3
+                    spacing: 0
 
                     Item {
                         width: parent.width
-                        height: 11
+                        height: 19
 
-                        Rectangle {
-                            anchors.centerIn: parent
-                            width: parent.width
-                            height: 1
-                            color: shell.dividerColor
+                        Text {
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: "INDOOR"
+                            color: theme.textPrimary
+                            font.family: "Adwaita Mono"
+                            font.pixelSize: 14
+                            font.weight: Font.Medium
+                        }
+
+                        Text {
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+                            visible: shell.indoorSourceCurrent
+                            text: shell.sensorLinkSummary
+                            color: theme.textMuted
+                            font.family: "Adwaita Mono"
+                            font.pixelSize: 10
+                            font.weight: Font.Medium
+                        }
+
+                        Loader {
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+                            active: !shell.indoorSourceCurrent
+
+                            sourceComponent: StatusMarker {
+                                label: shell.indoorSourceState
+                                    + (shell.sensorObservedAt !== ""
+                                        ? " · AS OF "
+                                            + shell.sensorObservedAt
+                                        : "")
+                                tone: shell.indoorSourceTone
+                            }
+                        }
+                    }
+
+                    Row {
+                        width: parent.width
+
+                        EnvironmentMetric {
+                            width: parent.width / 2
+                            label: "TEMP"
+                            value: shell.indoorSourceCurrent
+                                ? shell.temperature.toFixed(1) + "°C"
+                                : "--.-°C"
+                            comparison: shell.indoorSourceCurrent
+                                    && shell.outdoorSourceCurrent
+                                ? "OUT Δ "
+                                    + shell.differenceText(
+                                        shell.temperature,
+                                        shell.weatherTemperature,
+                                        1
+                                    ) + "°"
+                                : ""
+                        }
+
+                        EnvironmentMetric {
+                            width: parent.width / 2
+                            label: "HUMIDITY"
+                            value: shell.indoorSourceCurrent
+                                ? shell.humidity + "%"
+                                : "--%"
+                            comparison: shell.indoorSourceCurrent
+                                    && shell.outdoorSourceCurrent
+                                ? "OUT Δ "
+                                    + shell.differenceText(
+                                        shell.humidity,
+                                        shell.weatherHumidity,
+                                        0
+                                    ) + "%"
+                                : ""
+                        }
+                    }
+                }
+
+                ModuleDivider {
+                    width: parent.width
+                }
+
+                Column {
+                    width: parent.width
+                    spacing: 0
+
+                    Item {
+                        width: parent.width
+                        height: 19
+
+                        Text {
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: "OUTDOOR"
+                            color: theme.textPrimary
+                            font.family: "Adwaita Mono"
+                            font.pixelSize: 14
+                            font.weight: Font.Medium
+                        }
+
+                        Text {
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+                            visible: shell.outdoorSourceCurrent
+                            text: "OBS " + shell.weatherObservedAt
+                            color: theme.textMuted
+                            font.family: "Adwaita Mono"
+                            font.pixelSize: theme.observationMetadataSize
+                            font.weight: Font.Medium
+                        }
+
+                        Loader {
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+                            active: !shell.outdoorSourceCurrent
+
+                            sourceComponent: StatusMarker {
+                                label: shell.outdoorSourceState
+                                    + (shell.weatherAvailable
+                                        ? " · OBS "
+                                            + shell.weatherObservedAt
+                                        : "")
+                                tone: shell.outdoorSourceTone
+                            }
+                        }
+                    }
+
+                    Row {
+                        width: parent.width
+
+                        Column {
+                            width: 80
+                            spacing: -1
+
+                            Item {
+                                width: parent.width
+                                height: 11
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "CONDITION"
+                                    color: theme.textMuted
+                                    font.family: "Adwaita Mono"
+                                    font.pixelSize: 9
+                                    font.weight: Font.Medium
+                                }
+                            }
+
+                            Item {
+                                width: parent.width
+                                height: 31
+
+                                Text {
+                                    id: outdoorConditionIcon
+
+                                    anchors.centerIn: parent
+                                    text: shell.weatherAvailable
+                                        ? shell.weatherSymbol(shell.weatherState)
+                                        : "\uf172"
+                                    color: shell.weatherAvailable
+                                        ? shell.weatherColor(shell.weatherState)
+                                        : theme.textDisabled
+                                    font.family: "Material Symbols Rounded"
+                                    font.pixelSize: 28
+                                    font.weight: Font.Normal
+                                }
+                            }
+
+                        }
+
+                        EnvironmentMetric {
+                            width: 100
+                            label: "TEMP"
+                            reserveComparisonSpace: false
+                            value: shell.weatherAvailable
+                                ? shell.weatherTemperature.toFixed(1) + "°C"
+                                : "--.-°C"
+                            valueColor: shell.weatherAvailable
+                                ? theme.textPrimary : theme.textDisabled
+                        }
+
+                        EnvironmentMetric {
+                            width: 100
+                            label: "HUMIDITY"
+                            reserveComparisonSpace: false
+                            value: shell.weatherAvailable
+                                ? shell.weatherHumidity + "%" : "--%"
+                            valueColor: shell.weatherAvailable
+                                ? theme.textPrimary : theme.textDisabled
+                        }
+                    }
+                }
+
+                ModuleDivider {
+                    width: parent.width
+                    visible: forecastBlock.visible
+                }
+
+                Column {
+                    id: forecastBlock
+                    width: parent.width
+                    visible: shell.hourlyForecast.length > 0
+                    spacing: 0
+
+                    Item {
+                        width: parent.width
+                        height: 19
+
+                        Text {
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: "NEXT 5 HOURS"
+                            color: theme.textMuted
+                            font.family: "Adwaita Mono"
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
+                        }
+
+                        Text {
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: "PRECIP / TEMP"
+                            color: theme.textTertiary
+                            font.family: "Adwaita Mono"
+                            font.pixelSize: 9
+                            font.weight: Font.Normal
                         }
                     }
 
@@ -1279,33 +1833,39 @@ Scope {
 
                                     Text {
                                         width: parent.width
-                                        horizontalAlignment: Text.AlignHCenter
-                                        text: modelData.hour + "時"
-                                        color: "#f5f7ff"
-                                        font.family: "Noto Sans JP"
-                                        font.pixelSize: 14
+                                        horizontalAlignment:
+                                            Text.AlignHCenter
+                                        text: modelData.hour
+                                        color: theme.textPrimary
+                                        font.family: "Adwaita Mono"
+                                        font.pixelSize: 13
                                     }
 
                                     Text {
                                         width: parent.width
-                                        horizontalAlignment: Text.AlignHCenter
+                                        horizontalAlignment:
+                                            Text.AlignHCenter
                                         text: shell.forecastSymbol(modelData)
                                         color: shell.forecastColor(modelData)
-                                        font.family: "Material Symbols Rounded"
-                                        font.pixelSize: 26
+                                        font.family:
+                                            "Material Symbols Rounded"
+                                        font.pixelSize: 25
                                         font.weight: Font.Normal
                                     }
 
                                     Rectangle {
                                         width: parent.width
                                         height: 1
-                                        color: shell.dividerColor
+                                        color: theme.divider
                                     }
 
                                     Text {
                                         width: parent.width
-                                        horizontalAlignment: Text.AlignHCenter
-                                        text: shell.forecastNumber(modelData.precipitation) + "mm"
+                                        horizontalAlignment:
+                                            Text.AlignHCenter
+                                        text: shell.forecastNumber(
+                                            modelData.precipitation
+                                        ) + "mm"
                                         color: shell.precipitationColor(
                                             modelData.precipitation
                                         )
@@ -1316,14 +1876,17 @@ Scope {
                                     Rectangle {
                                         width: parent.width
                                         height: 1
-                                        color: shell.dividerColor
+                                        color: theme.divider
                                     }
 
                                     Text {
                                         width: parent.width
-                                        horizontalAlignment: Text.AlignHCenter
-                                        text: shell.forecastNumber(modelData.temperature) + "°"
-                                        color: "#f5f7ff"
+                                        horizontalAlignment:
+                                            Text.AlignHCenter
+                                        text: shell.forecastNumber(
+                                            modelData.temperature
+                                        ) + "°"
+                                        color: theme.textPrimary
                                         font.family: "Adwaita Sans"
                                         font.pixelSize: 17
                                     }
@@ -1335,26 +1898,28 @@ Scope {
                                         right: parent.right
                                         bottom: parent.bottom
                                     }
-                                    visible: index < shell.hourlyForecast.length - 1
+                                    visible: index
+                                        < shell.hourlyForecast.length - 1
                                     width: 1
-                                    color: shell.dividerColor
+                                    color: theme.divider
                                 }
                             }
                         }
                     }
                 }
 
-                Text {
+                ModuleDivider {
                     width: parent.width
-                    visible: shell.rainOutlook !== ""
-                    horizontalAlignment: Text.AlignHCenter
-                    text: "雨の見通し　" + shell.rainOutlook
-                    color: "#f5f7ff"
-                    font.family: "Noto Sans JP"
-                    font.pixelSize: 14
-                    font.weight: Font.Normal
+                    visible: rainOutlookRow.visible
                 }
 
+                ModuleFooterRow {
+                    id: rainOutlookRow
+                    width: parent.width
+                    visible: shell.rainOutlook !== ""
+                    fieldLabel: "RAIN OUTLOOK"
+                    fieldValue: shell.rainOutlook
+                }
             }
         }
     }
@@ -1364,17 +1929,19 @@ Scope {
         visible: shell.widgetsVisible
 
         anchors {
+            top: true
             bottom: true
             right: true
         }
 
         margins {
+            top: weatherWindow.margins.top + weatherWindow.implicitHeight
+                + shell.panelGap
             bottom: 12
             right: 12
         }
 
         implicitWidth: shell.widgetWidth
-        implicitHeight: radarContent.implicitHeight + 20
         color: "transparent"
         exclusiveZone: 0
         focusable: false
@@ -1382,7 +1949,7 @@ Scope {
         Rectangle {
             anchors.fill: parent
             radius: 0
-            color: shell.panelBackground
+            color: theme.panelBackground
             border.width: 0
 
             PanelEdge {
@@ -1391,52 +1958,67 @@ Scope {
 
             Column {
                 id: radarContent
-                anchors.centerIn: parent
+                anchors {
+                    bottom: parent.bottom
+                    bottomMargin: shell.panelBottomInset
+                    horizontalCenter: parent.horizontalCenter
+                }
                 width: shell.panelContentWidth
-                spacing: 5
+                spacing: 0
 
                 Item {
                     width: parent.width
-                    height: Math.max(
-                        radarTitle.implicitHeight,
-                        radarFrameTime.implicitHeight
-                    )
+                    height: shell.radarHeaderHeight
 
-                    Text {
-                        id: radarTitle
+                    ModuleHeaderRail {
                         anchors {
                             left: parent.left
                             verticalCenter: parent.verticalCenter
+                            verticalCenterOffset: -4
                         }
-                        text: "雨雲レーダー"
-                        color: "#f5f7ff"
-                        font.family: "Noto Sans JP"
-                        font.pixelSize: shell.panelTitleSize
+                        tone: shell.radarSourceTone
+                    }
+
+                    Text {
+                        anchors {
+                            left: parent.left
+                            leftMargin: 10
+                            verticalCenter: parent.verticalCenter
+                            verticalCenterOffset: -4
+                        }
+                        text: "RAIN RADAR"
+                        color: theme.textPrimary
+                        font.family: "Adwaita Mono"
+                        font.pixelSize: 17
                         font.weight: Font.Medium
                     }
 
                     Text {
-                        id: radarFrameTime
+                        width: 150
                         anchors {
                             right: parent.right
                             verticalCenter: parent.verticalCenter
+                            verticalCenterOffset: -4
                         }
-                        text: shell.radarAvailable
-                            ? shell.radarFrameLabel()
-                                + (shell.radarFetchFailed ? " · 更新失敗" : "")
-                            : shell.radarFetchFailed ? "取得失敗" : "取得中…"
-                        color: shell.radarFetchFailed ? "#efa0ad" : "#c7cad5"
-                        font.family: "Noto Sans JP"
-                        font.pixelSize: shell.panelMetaSize
+                        horizontalAlignment: Text.AlignRight
+                        text: shell.radarFrameStatusText
+                        color: theme.textSecondary
+                        font.family: "Adwaita Mono"
+                        font.pixelSize: theme.observationMetadataSize
                         font.weight: Font.Normal
                     }
+                }
+
+                ModuleDivider {
+                    width: parent.width
+                    lineOffsetY: -6
                 }
 
                 Rectangle {
                     id: radarViewport
                     width: parent.width
-                    height: 192
-                    color: "#0b0d12"
+                    height: shell.radarViewportHeight
+                    color: theme.radarBackground
                     clip: true
 
                     RadarFrameSet {
@@ -1456,7 +2038,7 @@ Scope {
                         visible: shell.radarAvailable
                         width: parent.width
                         height: 1
-                        color: "#20f5f7ff"
+                        color: theme.radarGrid
                     }
 
                     Rectangle {
@@ -1464,7 +2046,7 @@ Scope {
                         visible: shell.radarAvailable
                         width: 1
                         height: parent.height
-                        color: "#20f5f7ff"
+                        color: theme.radarGrid
                     }
 
                     Repeater {
@@ -1480,16 +2062,17 @@ Scope {
                             radius: width / 2
                             color: "transparent"
                             border.width: 1
-                            border.color: "#42f5f7ff"
+                            border.color: theme.radarRangeRing
                         }
                     }
 
                     Text {
                         anchors.centerIn: parent
                         visible: !shell.radarAvailable
-                        text: shell.radarFetchFailed ? "レーダーを取得できません" : "取得中…"
-                        color: "#555862"
-                        font.family: "Noto Sans JP"
+                        text: shell.radarFetchFailed
+                            ? "RADAR UNAVAILABLE" : "FETCHING RADAR…"
+                        color: theme.radarUnavailableText
+                        font.family: "Adwaita Mono"
                         font.pixelSize: 13
                     }
 
@@ -1505,7 +2088,7 @@ Scope {
                             width: 12
                             height: 12
                             radius: 6
-                            color: "#e6ffffff"
+                            color: theme.radarMarkerHalo
                         }
 
                         Rectangle {
@@ -1513,21 +2096,8 @@ Scope {
                             width: 5
                             height: 5
                             radius: 2.5
-                            color: "#e85d75"
+                            color: theme.radarMarkerCore
                         }
-                    }
-
-                    Text {
-                        anchors {
-                            left: radarMarker.right
-                            leftMargin: 4
-                            verticalCenter: radarMarker.verticalCenter
-                        }
-                        visible: shell.radarAvailable
-                        text: "仲宿"
-                        color: "#d8dbe5"
-                        font.family: "Noto Sans JP"
-                        font.pixelSize: 9
                     }
 
                     Text {
@@ -1538,9 +2108,9 @@ Scope {
                             bottomMargin: 3
                         }
                         visible: shell.radarAvailable
-                        text: "2 / 5 km"
-                        color: "#7f8492"
-                        font.family: "Adwaita Sans"
+                        text: shell.radarViewSummary + " · RANGE 2 / 5 KM"
+                        color: theme.textTertiary
+                        font.family: "Adwaita Mono"
                         font.pixelSize: 8
                     }
 
@@ -1553,15 +2123,111 @@ Scope {
                             bottomMargin: 3
                         }
                         textFormat: Text.StyledText
-                        text: "<a href='https://www.jma.go.jp/bosai/nowc/'>気象庁(加工)</a>"
-                        color: "#7f8492"
-                        linkColor: "#aeb3c2"
-                        font.family: "Noto Sans JP"
+                        text: "<a href='https://www.jma.go.jp/bosai/nowc/'>JMA NOWCAST</a>"
+                        color: theme.textTertiary
+                        linkColor: theme.textMuted
+                        font.family: "Adwaita Mono"
                         font.pixelSize: 8
                         onLinkActivated: link => Qt.openUrlExternally(link)
                     }
+
+                    Rectangle {
+                        anchors {
+                            top: parent.top
+                            left: parent.left
+                            right: parent.right
+                        }
+                        visible: shell.radarAvailable
+                        height: 18
+                        color: theme.radarTelemetryBackground
+                        z: 2
+
+                        Rectangle {
+                            anchors {
+                                left: parent.left
+                                right: parent.right
+                                bottom: parent.bottom
+                            }
+                            height: 1
+                            color: theme.radarGrid
+                        }
+
+                        Text {
+                            anchors {
+                                left: parent.left
+                                leftMargin: 5
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: "FRAME " + (shell.radarFrameIndex + 1)
+                                + "/" + shell.radarActiveFrames.length
+                            color: theme.textSecondary
+                            font.family: "Adwaita Mono"
+                            font.pixelSize: 8
+                            font.weight: Font.Medium
+                        }
+
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 4
+
+                            Repeater {
+                                model: shell.radarActiveFrames
+
+                                delegate: Row {
+                                    required property int index
+                                    required property var modelData
+
+                                    spacing: 4
+
+                                    Text {
+                                        text: shell.radarTimelineLabel(modelData)
+                                        color: index === shell.radarFrameIndex
+                                            ? theme.textPrimary
+                                            : theme.textTertiary
+                                        font.family: "Adwaita Mono"
+                                        font.pixelSize: 8
+                                        font.weight:
+                                            index === shell.radarFrameIndex
+                                                ? Font.Medium : Font.Normal
+                                    }
+
+                                    Text {
+                                        visible: index
+                                            < shell.radarActiveFrames.length - 1
+                                        text: "|"
+                                        color: theme.textDisabled
+                                        font.family: "Adwaita Mono"
+                                        font.pixelSize: 8
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            anchors {
+                                right: parent.right
+                                rightMargin: 5
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: shell.radarPlaybackMode
+                            color: theme.textTertiary
+                            font.family: "Adwaita Mono"
+                            font.pixelSize: 8
+                            font.weight: Font.Medium
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    Process {
+        command: ["/usr/bin/date", "+%Z"]
+        running: true
+
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: line => shell.currentTimeZoneAbbreviation = line.trim()
         }
     }
 
@@ -1685,6 +2351,20 @@ Scope {
             }
             shell.radarFrameIndex = (shell.radarFrameIndex + 1)
                 % shell.radarActiveFrames.length;
+        }
+    }
+
+    Timer {
+        interval: 5000
+        running: true
+        repeat: true
+        onTriggered: {
+            if (shell.sensorAvailable)
+                shell.sensorFresh = Date.now() - shell.sensorLastUpdateMs
+                    <= 60000;
+            if (shell.weatherAvailable)
+                shell.weatherFresh = Date.now() - shell.weatherLastUpdateMs
+                    <= 360000;
         }
     }
 
