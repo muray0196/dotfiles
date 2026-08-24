@@ -31,6 +31,8 @@ QtObject {
     readonly property int moduleFooterLabelSize: 10
     readonly property int moduleFooterValueSize: 12
     readonly property int observationMetadataSize: 10
+    readonly property int metricValueSize: 25
+    readonly property int metricUnitSize: 16
 
     // Data state
     readonly property color statusOk: "#9ece6a"
@@ -41,7 +43,8 @@ QtObject {
     readonly property color statusErrorText: "#efa0ad"
 
     // Module and resource identity
-    readonly property color clockHeaderAccent: "#c7cad5"
+    readonly property color neutralHeaderAccent: textMuted
+    readonly property color clockHeaderAccent: neutralHeaderAccent
     readonly property color cpuAccent: "#7dcfff"
     readonly property color environmentHeaderAccent: "#7dcfff"
     readonly property color rainAccent: "#7dcfff"
@@ -51,7 +54,7 @@ QtObject {
     readonly property color storageAccent: "#e0af68"
 
     // Calendar meaning
-    readonly property color calendarHeaderAccent: "#c7cad5"
+    readonly property color calendarHeaderAccent: neutralHeaderAccent
     readonly property color calendarGridVertical: "#20c7cad5"
     readonly property color calendarGridHorizontal: "#32c7cad5"
     readonly property color calendarSundayHoliday: "#efa0ad"

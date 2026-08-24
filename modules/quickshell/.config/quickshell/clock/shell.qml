@@ -249,29 +249,6 @@ Scope {
         };
     }
 
-    component StatusMarker: Row {
-        required property string label
-        required property color tone
-
-        spacing: 5
-
-        Rectangle {
-            anchors.verticalCenter: parent.verticalCenter
-            width: 8
-            height: 8
-            radius: 0
-            color: tone
-        }
-
-        Text {
-            text: label
-            color: tone
-            font.family: "Adwaita Mono"
-            font.pixelSize: 11
-            font.weight: Font.Medium
-        }
-    }
-
     component ModuleHeaderRail: Rectangle {
         required property color tone
 
@@ -283,10 +260,12 @@ Scope {
 
     component EnvironmentMetric: Column {
         required property string label
-        required property string value
+        required property string valueText
+        required property string unitText
         property string comparison: ""
         property bool reserveComparisonSpace: true
         property color valueColor: theme.textPrimary
+        property color unitColor: theme.textSecondary
 
         spacing: -1
 
@@ -304,14 +283,33 @@ Scope {
             }
         }
 
-        Text {
+        Item {
             width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            text: value
-            color: valueColor
-            font.family: "Adwaita Sans"
-            font.pixelSize: 25
-            font.weight: Font.Normal
+            height: environmentValueRow.implicitHeight
+
+            Row {
+                id: environmentValueRow
+                anchors.centerIn: parent
+                spacing: 2
+
+                Text {
+                    id: environmentValue
+                    text: valueText
+                    color: valueColor
+                    font.family: "Adwaita Sans"
+                    font.pixelSize: theme.metricValueSize
+                    font.weight: Font.Normal
+                }
+
+                Text {
+                    anchors.baseline: environmentValue.baseline
+                    text: unitText
+                    color: unitColor
+                    font.family: "Adwaita Sans"
+                    font.pixelSize: theme.metricUnitSize
+                    font.weight: Font.Normal
+                }
+            }
         }
 
         Item {
@@ -1565,51 +1563,17 @@ Scope {
                     width: parent.width
                     spacing: 0
 
-                    Item {
+                    UI.SectionHeader {
                         width: parent.width
-                        height: 19
-
-                        Text {
-                            anchors {
-                                left: parent.left
-                                verticalCenter: parent.verticalCenter
-                            }
-                            text: "INDOOR"
-                            color: theme.textPrimary
-                            font.family: "Adwaita Mono"
-                            font.pixelSize: 14
-                            font.weight: Font.Medium
-                        }
-
-                        Text {
-                            anchors {
-                                right: parent.right
-                                verticalCenter: parent.verticalCenter
-                            }
-                            visible: shell.indoorSourceCurrent
-                            text: shell.sensorLinkSummary
-                            color: theme.textMuted
-                            font.family: "Adwaita Mono"
-                            font.pixelSize: 10
-                            font.weight: Font.Medium
-                        }
-
-                        Loader {
-                            anchors {
-                                right: parent.right
-                                verticalCenter: parent.verticalCenter
-                            }
-                            active: !shell.indoorSourceCurrent
-
-                            sourceComponent: StatusMarker {
-                                label: shell.indoorSourceState
-                                    + (shell.sensorObservedAt !== ""
-                                        ? " · AS OF "
-                                            + shell.sensorObservedAt
-                                        : "")
-                                tone: shell.indoorSourceTone
-                            }
-                        }
+                        label: "INDOOR"
+                        metadata: shell.sensorLinkSummary
+                        metadataVisible: shell.indoorSourceCurrent
+                        statusActive: !shell.indoorSourceCurrent
+                        statusLabel: shell.indoorSourceState
+                            + (shell.sensorObservedAt !== ""
+                                ? " · AS OF " + shell.sensorObservedAt
+                                : "")
+                        statusTone: shell.indoorSourceTone
                     }
 
                     Row {
@@ -1618,9 +1582,9 @@ Scope {
                         EnvironmentMetric {
                             width: parent.width / 2
                             label: "TEMP"
-                            value: shell.indoorSourceCurrent
-                                ? shell.temperature.toFixed(1) + "°C"
-                                : "--.-°C"
+                            valueText: shell.indoorSourceCurrent
+                                ? shell.temperature.toFixed(1) : "--.-"
+                            unitText: "°C"
                             comparison: shell.indoorSourceCurrent
                                     && shell.outdoorSourceCurrent
                                 ? "OUT Δ "
@@ -1635,9 +1599,9 @@ Scope {
                         EnvironmentMetric {
                             width: parent.width / 2
                             label: "HUMIDITY"
-                            value: shell.indoorSourceCurrent
-                                ? shell.humidity + "%"
-                                : "--%"
+                            valueText: shell.indoorSourceCurrent
+                                ? shell.humidity.toString() : "--"
+                            unitText: "%"
                             comparison: shell.indoorSourceCurrent
                                     && shell.outdoorSourceCurrent
                                 ? "OUT Δ "
@@ -1659,51 +1623,17 @@ Scope {
                     width: parent.width
                     spacing: 0
 
-                    Item {
+                    UI.SectionHeader {
                         width: parent.width
-                        height: 19
-
-                        Text {
-                            anchors {
-                                left: parent.left
-                                verticalCenter: parent.verticalCenter
-                            }
-                            text: "OUTDOOR"
-                            color: theme.textPrimary
-                            font.family: "Adwaita Mono"
-                            font.pixelSize: 14
-                            font.weight: Font.Medium
-                        }
-
-                        Text {
-                            anchors {
-                                right: parent.right
-                                verticalCenter: parent.verticalCenter
-                            }
-                            visible: shell.outdoorSourceCurrent
-                            text: "OBS " + shell.weatherObservedAt
-                            color: theme.textMuted
-                            font.family: "Adwaita Mono"
-                            font.pixelSize: theme.observationMetadataSize
-                            font.weight: Font.Medium
-                        }
-
-                        Loader {
-                            anchors {
-                                right: parent.right
-                                verticalCenter: parent.verticalCenter
-                            }
-                            active: !shell.outdoorSourceCurrent
-
-                            sourceComponent: StatusMarker {
-                                label: shell.outdoorSourceState
-                                    + (shell.weatherAvailable
-                                        ? " · OBS "
-                                            + shell.weatherObservedAt
-                                        : "")
-                                tone: shell.outdoorSourceTone
-                            }
-                        }
+                        label: "OUTDOOR"
+                        metadata: "OBS " + shell.weatherObservedAt
+                        metadataVisible: shell.outdoorSourceCurrent
+                        statusActive: !shell.outdoorSourceCurrent
+                        statusLabel: shell.outdoorSourceState
+                            + (shell.weatherAvailable
+                                ? " · OBS " + shell.weatherObservedAt
+                                : "")
+                        statusTone: shell.outdoorSourceTone
                     }
 
                     Row {
@@ -1753,21 +1683,26 @@ Scope {
                             width: 100
                             label: "TEMP"
                             reserveComparisonSpace: false
-                            value: shell.weatherAvailable
-                                ? shell.weatherTemperature.toFixed(1) + "°C"
-                                : "--.-°C"
+                            valueText: shell.weatherAvailable
+                                ? shell.weatherTemperature.toFixed(1) : "--.-"
+                            unitText: "°C"
                             valueColor: shell.weatherAvailable
                                 ? theme.textPrimary : theme.textDisabled
+                            unitColor: shell.weatherAvailable
+                                ? theme.textSecondary : theme.textDisabled
                         }
 
                         EnvironmentMetric {
                             width: 100
                             label: "HUMIDITY"
                             reserveComparisonSpace: false
-                            value: shell.weatherAvailable
-                                ? shell.weatherHumidity + "%" : "--%"
+                            valueText: shell.weatherAvailable
+                                ? shell.weatherHumidity.toString() : "--"
+                            unitText: "%"
                             valueColor: shell.weatherAvailable
                                 ? theme.textPrimary : theme.textDisabled
+                            unitColor: shell.weatherAvailable
+                                ? theme.textSecondary : theme.textDisabled
                         }
                     }
                 }
@@ -1935,7 +1870,7 @@ Scope {
         }
 
         margins {
-            top: weatherWindow.margins.top + weatherWindow.implicitHeight
+            top: weatherWindow.margins.top + weatherWindow.height
                 + shell.panelGap
             bottom: 12
             right: 12
@@ -2074,30 +2009,6 @@ Scope {
                         color: theme.radarUnavailableText
                         font.family: "Adwaita Mono"
                         font.pixelSize: 13
-                    }
-
-                    Item {
-                        id: radarMarker
-                        anchors.centerIn: parent
-                        visible: shell.radarAvailable
-                        width: 14
-                        height: 14
-
-                        Rectangle {
-                            anchors.centerIn: parent
-                            width: 12
-                            height: 12
-                            radius: 6
-                            color: theme.radarMarkerHalo
-                        }
-
-                        Rectangle {
-                            anchors.centerIn: parent
-                            width: 5
-                            height: 5
-                            radius: 2.5
-                            color: theme.radarMarkerCore
-                        }
                     }
 
                     Text {

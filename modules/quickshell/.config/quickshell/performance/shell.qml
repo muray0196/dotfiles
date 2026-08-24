@@ -1,9 +1,14 @@
 import Quickshell
 import Quickshell.Io
 import QtQuick
+import "common" as UI
 
 Scope {
     id: shell
+
+    UI.Theme {
+        id: theme
+    }
 
     property bool widgetsVisible: true
     readonly property string performanceScriptsDir:
@@ -14,84 +19,140 @@ Scope {
         Quickshell.shellDir + "/automation.json"
     readonly property string machineConfigPath:
         Quickshell.shellDir + "/machine.json"
-    readonly property color panelBackground: "#b5181822"
-    readonly property color panelEdgeLight: "#8a717683"
-    readonly property color panelEdgeDark: "#8a30333d"
-    readonly property color dividerColor: "#665c606b"
+    readonly property int panelWidth: 312
     readonly property int panelContentWidth: 280
-    readonly property int panelTitleSize: 18
-    readonly property int cardSectionSpacing: 10
+    readonly property int moduleDividerHeight: 7
+    readonly property int panelInset: 10
+    readonly property int pollIntervalSeconds: 2
+    readonly property int freshnessCautionMs: 6000
+    readonly property int freshnessErrorMs: 30000
     readonly property string smallLabelFont: "Adwaita Mono"
-    readonly property string numericFont: "Adwaita Mono"
+    readonly property string numericFont: "Adwaita Sans"
+    property double nowMs: Date.now()
 
     function updateMetrics(target, line) {
         try {
             const reading = JSON.parse(line);
-            if (!reading.cpu || !reading.gpu || !reading.memory || !reading.vram)
+            if (!reading || typeof reading !== "object")
                 return;
-            if (typeof reading.cpu.usage_percent !== "number"
-                    || typeof reading.gpu.usage_percent !== "number"
-                    || typeof reading.memory.usage_percent !== "number"
-                    || typeof reading.vram.usage_percent !== "number")
+            const hasMetricPayload = reading.cpu !== undefined
+                || reading.gpu !== undefined
+                || reading.memory !== undefined
+                || reading.vram !== undefined
+                || reading.storage !== undefined
+                || reading.network !== undefined
+                || Array.isArray(reading.gpus);
+            if (reading.schema_version !== 1 || !hasMetricPayload)
                 return;
 
-            target.cpuUsage = reading.cpu.usage_percent;
-            target.cpuModel = typeof reading.cpu.model === "string"
-                ? reading.cpu.model : "";
-            target.cpuTemperature = reading.cpu.temperature_c;
-            target.cpuPower = reading.cpu.power_w;
-            target.gpuUsage = reading.gpu.usage_percent;
-            target.gpuModel = typeof reading.gpu.model === "string"
-                ? reading.gpu.model : "";
-            target.gpuTemperature = reading.gpu.temperature_c;
-            target.gpuPower = reading.gpu.power_w;
-            target.memoryUsed = reading.memory.used_bytes;
-            target.memoryTotal = reading.memory.total_bytes;
-            target.memoryUsage = reading.memory.usage_percent;
-            target.vramUsed = reading.vram.used_bytes;
-            target.vramTotal = reading.vram.total_bytes;
-            target.vramUsage = reading.vram.usage_percent;
+            const receivedAt = Date.now();
+            const cpu = reading.cpu && typeof reading.cpu === "object"
+                ? reading.cpu : {};
+            const gpu = reading.gpu && typeof reading.gpu === "object"
+                ? reading.gpu : {};
+            const memory = reading.memory && typeof reading.memory === "object"
+                ? reading.memory : {};
+            const vram = reading.vram && typeof reading.vram === "object"
+                ? reading.vram : {};
+
+            target.host = typeof reading.host === "string"
+                ? reading.host : "";
+
+            target.cpuAvailable = typeof cpu.usage_percent === "number";
+            if (target.cpuAvailable)
+                target.cpuUsage = cpu.usage_percent;
+            if (typeof cpu.model === "string")
+                target.cpuModel = cpu.model;
+            target.cpuTemperature = typeof cpu.temperature_c === "number"
+                ? cpu.temperature_c : null;
+            target.cpuPower = typeof cpu.power_w === "number"
+                ? cpu.power_w : null;
+
+            target.gpuAvailable = typeof gpu.usage_percent === "number";
+            if (target.gpuAvailable)
+                target.gpuUsage = gpu.usage_percent;
+            if (typeof gpu.model === "string")
+                target.gpuModel = gpu.model;
+            target.gpuTemperature = typeof gpu.temperature_c === "number"
+                ? gpu.temperature_c : null;
+            target.gpuPower = typeof gpu.power_w === "number"
+                ? gpu.power_w : null;
+
+            target.memoryAvailable =
+                typeof memory.used_bytes === "number"
+                && typeof memory.total_bytes === "number"
+                && typeof memory.usage_percent === "number";
+            if (target.memoryAvailable) {
+                target.memoryUsed = memory.used_bytes;
+                target.memoryTotal = memory.total_bytes;
+                target.memoryUsage = memory.usage_percent;
+            }
+
+            target.vramAvailable = typeof vram.used_bytes === "number"
+                && typeof vram.total_bytes === "number"
+                && typeof vram.usage_percent === "number";
+            if (target.vramAvailable) {
+                target.vramUsed = vram.used_bytes;
+                target.vramTotal = vram.total_bytes;
+                target.vramUsage = vram.usage_percent;
+            }
+
             const gpuEntries = [];
             const sourceGpus = Array.isArray(reading.gpus)
                 ? reading.gpus
-                : [{
-                    id: "primary",
-                    display_connected: false,
-                    model: reading.gpu.model,
-                    usage_percent: reading.gpu.usage_percent,
-                    temperature_c: reading.gpu.temperature_c,
-                    power_w: reading.gpu.power_w,
-                    vram: reading.vram
-                }];
+                : reading.gpu && typeof reading.gpu === "object"
+                    ? [{
+                        id: "primary",
+                        display_connected: false,
+                        model: gpu.model,
+                        usage_percent: gpu.usage_percent,
+                        temperature_c: gpu.temperature_c,
+                        power_w: gpu.power_w,
+                        vram: vram
+                    }]
+                    : [];
             for (let index = 0; index < sourceGpus.length; index++) {
-                const gpu = sourceGpus[index];
-                if (!gpu || typeof gpu !== "object")
+                const sourceGpu = sourceGpus[index];
+                if (!sourceGpu || typeof sourceGpu !== "object")
                     continue;
-                const vram = gpu.vram && typeof gpu.vram === "object"
-                    ? gpu.vram : {};
-                const gpuAvailable = typeof gpu.usage_percent === "number";
-                const vramAvailable = typeof vram.used_bytes === "number"
-                    && typeof vram.total_bytes === "number"
-                    && typeof vram.usage_percent === "number";
+                const gpuVram = sourceGpu.vram
+                        && typeof sourceGpu.vram === "object"
+                    ? sourceGpu.vram : {};
+                const gpuAvailable =
+                    typeof sourceGpu.usage_percent === "number";
+                const gpuVramAvailable =
+                    typeof gpuVram.used_bytes === "number"
+                    && typeof gpuVram.total_bytes === "number"
+                    && typeof gpuVram.usage_percent === "number";
                 gpuEntries.push({
-                    id: typeof gpu.id === "string" ? gpu.id : "gpu-" + index,
-                    displayConnected: gpu.display_connected === true,
-                    model: typeof gpu.model === "string" ? gpu.model : "",
-                    runtimeStatus: typeof gpu.runtime_status === "string"
-                        ? gpu.runtime_status : "",
+                    id: typeof sourceGpu.id === "string"
+                        ? sourceGpu.id : "gpu-" + index,
+                    displayConnected:
+                        sourceGpu.display_connected === true,
+                    model: typeof sourceGpu.model === "string"
+                        ? sourceGpu.model : "",
+                    runtimeStatus:
+                        typeof sourceGpu.runtime_status === "string"
+                        ? sourceGpu.runtime_status : "",
                     available: gpuAvailable,
-                    usage: gpuAvailable ? gpu.usage_percent : 0,
-                    temperature: gpu.temperature_c,
-                    power: gpu.power_w,
+                    usage: gpuAvailable ? sourceGpu.usage_percent : 0,
+                    temperature:
+                        typeof sourceGpu.temperature_c === "number"
+                        ? sourceGpu.temperature_c : null,
+                    power: typeof sourceGpu.power_w === "number"
+                        ? sourceGpu.power_w : null,
                     vram: {
-                        available: vramAvailable,
-                        used: vramAvailable ? vram.used_bytes : 0,
-                        total: vramAvailable ? vram.total_bytes : 0,
-                        usage: vramAvailable ? vram.usage_percent : 0
+                        available: gpuVramAvailable,
+                        used: gpuVramAvailable ? gpuVram.used_bytes : 0,
+                        total: gpuVramAvailable ? gpuVram.total_bytes : 0,
+                        usage: gpuVramAvailable
+                            ? gpuVram.usage_percent : 0
                     }
                 });
             }
             target.gpus = gpuEntries;
+
+            target.storageKnown = reading.storage !== undefined;
             target.storageAvailable = reading.storage !== null
                 && typeof reading.storage === "object"
                 && typeof reading.storage.used_bytes === "number"
@@ -102,9 +163,12 @@ Scope {
                 target.storageTotal = reading.storage.total_bytes;
                 target.storageUsage = reading.storage.usage_percent;
             }
+
             const storageEntries = [];
             if (Array.isArray(reading.storage_volumes)) {
-                for (let index = 0; index < reading.storage_volumes.length; index++) {
+                for (let index = 0;
+                        index < reading.storage_volumes.length;
+                        index++) {
                     const volume = reading.storage_volumes[index];
                     if (!volume || typeof volume !== "object"
                             || typeof volume.label !== "string")
@@ -116,29 +180,62 @@ Scope {
                     storageEntries.push({
                         label: volume.label,
                         kind: typeof volume.kind === "string"
-                            ? volume.kind : "other",
+                            ? volume.kind : "",
+                        known: true,
                         available: volumeAvailable,
                         used: volumeAvailable ? volume.used_bytes : 0,
                         total: volumeAvailable ? volume.total_bytes : 0,
-                        usage: volumeAvailable ? volume.usage_percent : 0
+                        usage: volumeAvailable
+                            ? volume.usage_percent : 0
                     });
                 }
             }
             target.storageVolumes = storageEntries;
+
+            target.networkKnown = reading.network !== undefined;
             target.networkAvailable = reading.network !== null
                 && typeof reading.network === "object"
-                && typeof reading.network.download_bytes_per_second === "number"
-                && typeof reading.network.upload_bytes_per_second === "number";
+                && typeof reading.network
+                    .download_bytes_per_second === "number"
+                && typeof reading.network
+                    .upload_bytes_per_second === "number";
             if (target.networkAvailable) {
-                target.networkDownload = reading.network.download_bytes_per_second;
-                target.networkUpload = reading.network.upload_bytes_per_second;
+                target.networkInterface =
+                    typeof reading.network.interface === "string"
+                    ? reading.network.interface : "";
+                target.networkDownload =
+                    reading.network.download_bytes_per_second;
+                target.networkUpload =
+                    reading.network.upload_bytes_per_second;
+            } else {
+                target.networkInterface = "";
             }
-            target.uptimeAvailable = typeof reading.uptime_seconds === "number";
+
+            target.uptimeAvailable =
+                typeof reading.uptime_seconds === "number";
             if (target.uptimeAvailable)
                 target.uptimeSeconds = reading.uptime_seconds;
-            target.lastUpdateMs = Date.now();
+
+            target.partial = !target.cpuAvailable
+                || !target.gpuAvailable
+                || !target.memoryAvailable
+                || !target.vramAvailable
+                || target.cpuTemperature === null
+                || target.cpuPower === null
+                || target.gpuTemperature === null
+                || target.gpuPower === null
+                || (target.expectsSystemDetails
+                    && (!target.storageAvailable
+                        || !target.networkAvailable
+                        || target.networkInterface === ""
+                        || !target.uptimeAvailable
+                        || gpuEntries.length === 0));
+            target.unavailable = !target.cpuAvailable
+                && !target.gpuAvailable
+                && !target.memoryAvailable
+                && !target.vramAvailable;
+            target.lastUpdateMs = receivedAt;
             target.available = true;
-            target.fresh = true;
         } catch (error) {
             console.warn("Invalid system metrics:", error);
         }
@@ -158,52 +255,65 @@ Scope {
             .trim();
     }
 
-    function mutedUnit(value) {
-        return "<font color=\"#8b8e99\">" + value + "</font>";
+    function localGpuDetail(gpu) {
+        if (!gpu || typeof gpu !== "object")
+            return "SENSOR --";
+        const fields = [];
+        if (gpu.displayConnected === true)
+            fields.push("DISPLAY");
+        if (typeof gpu.runtimeStatus === "string"
+                && gpu.runtimeStatus !== ""
+                && gpu.runtimeStatus.toLowerCase() !== "active")
+            fields.push(gpu.runtimeStatus.toUpperCase());
+        if (typeof gpu.model === "string" && gpu.model !== "")
+            fields.push(compactModelName(gpu.model));
+        return fields.length > 0 ? fields.join(" · ") : "MODEL --";
     }
 
-    function temperature(value) {
-        return (typeof value === "number" ? value.toFixed(0) : "--")
-            + mutedUnit("°C");
+    function percentageValue(value, available, precision) {
+        return available && typeof value === "number"
+            ? value.toFixed(precision === undefined ? 0 : precision)
+            : "--";
     }
 
-    function power(value) {
-        return (typeof value === "number" ? value.toFixed(0) : "--")
-            + " " + mutedUnit("W");
+    function metricValue(value, precision) {
+        return typeof value === "number"
+            ? value.toFixed(precision === undefined ? 0 : precision)
+            : "--";
     }
 
     function gibibytes(value) {
         return (value / 1073741824).toFixed(1);
     }
 
-    function memoryAmount(used, total, available) {
+    function capacitySummary(used, total, available) {
         return available
-            ? gibibytes(used) + " / " + gibibytes(total)
-                + " " + mutedUnit("GiB")
-            : "-- / -- " + mutedUnit("GiB");
+            ? gibibytes(used) + " / " + gibibytes(total) + " GiB"
+            : "-- / -- GiB";
     }
 
-    function storageAmount(used, total, available) {
-        return available
-            ? gibibytes(used).replace(".0", "") + " / "
-                + gibibytes(total).replace(".0", "")
-                + " " + mutedUnit("GiB")
-            : "-- / -- " + mutedUnit("GiB");
-    }
-
-    function byteRate(value, available) {
-        if (!available)
-            return "-- " + mutedUnit("B/s");
+    function byteRateValue(value, available) {
+        if (!available || typeof value !== "number")
+            return "--";
         if (value >= 1073741824)
-            return (value / 1073741824).toFixed(1)
-                + " " + mutedUnit("GiB/s");
+            return (value / 1073741824).toFixed(1);
         if (value >= 1048576)
-            return (value / 1048576).toFixed(1)
-                + " " + mutedUnit("MiB/s");
+            return (value / 1048576).toFixed(1);
         if (value >= 1024)
-            return (value / 1024).toFixed(1)
-                + " " + mutedUnit("KiB/s");
-        return value.toFixed(0) + " " + mutedUnit("B/s");
+            return (value / 1024).toFixed(1);
+        return value.toFixed(0);
+    }
+
+    function byteRateUnit(value, available) {
+        if (!available || typeof value !== "number")
+            return "B/s";
+        if (value >= 1073741824)
+            return "GiB/s";
+        if (value >= 1048576)
+            return "MiB/s";
+        if (value >= 1024)
+            return "KiB/s";
+        return "B/s";
     }
 
     function uptime(value, available) {
@@ -217,21 +327,44 @@ Scope {
             : "UP " + hours + "h";
     }
 
+    function sampleAgeMs(metrics) {
+        return metrics.available
+            ? Math.max(0, nowMs - metrics.lastUpdateMs) : -1;
+    }
+
+    function moduleTone(metrics) {
+        if (!metrics.available)
+            return theme.statusUnknown;
+        const age = sampleAgeMs(metrics);
+        if (age > freshnessErrorMs || metrics.unavailable)
+            return theme.statusError;
+        if (age > freshnessCautionMs || metrics.partial)
+            return theme.statusCaution;
+        return theme.statusOk;
+    }
+
     component MetricsData: QtObject {
+        property bool expectsSystemDetails: false
         property bool available: false
-        property bool fresh: false
+        property bool partial: false
+        property bool unavailable: false
         property double lastUpdateMs: 0
+        property string host: ""
+        property bool cpuAvailable: false
         property real cpuUsage: 0
         property string cpuModel: ""
         property var cpuTemperature: null
         property var cpuPower: null
+        property bool gpuAvailable: false
         property real gpuUsage: 0
         property string gpuModel: ""
         property var gpuTemperature: null
         property var gpuPower: null
+        property bool memoryAvailable: false
         property real memoryUsed: 0
         property real memoryTotal: 0
         property real memoryUsage: 0
+        property bool vramAvailable: false
         property real vramUsed: 0
         property real vramTotal: 0
         property real vramUsage: 0
@@ -240,8 +373,11 @@ Scope {
         property real storageUsed: 0
         property real storageTotal: 0
         property real storageUsage: 0
+        property bool storageKnown: false
         property var storageVolumes: []
+        property bool networkKnown: false
         property bool networkAvailable: false
+        property string networkInterface: ""
         property real networkDownload: 0
         property real networkUpload: 0
         property bool uptimeAvailable: false
@@ -250,6 +386,7 @@ Scope {
 
     MetricsData {
         id: localData
+        expectsSystemDetails: true
     }
 
     MetricsData {
@@ -282,7 +419,7 @@ Scope {
                 right: parent.right
             }
             height: 1
-            color: shell.panelEdgeLight
+            color: theme.panelEdgeLight
         }
 
         Rectangle {
@@ -292,7 +429,7 @@ Scope {
                 left: parent.left
             }
             width: 1
-            color: shell.panelEdgeLight
+            color: theme.panelEdgeLight
         }
 
         Rectangle {
@@ -302,7 +439,7 @@ Scope {
                 bottom: parent.bottom
             }
             height: 1
-            color: shell.panelEdgeDark
+            color: theme.panelEdgeDark
         }
 
         Rectangle {
@@ -312,7 +449,27 @@ Scope {
                 bottom: parent.bottom
             }
             width: 1
-            color: shell.panelEdgeDark
+            color: theme.panelEdgeDark
+        }
+    }
+
+    component ModuleHeaderRail: Rectangle {
+        required property color tone
+
+        width: 3
+        height: 18
+        radius: 0
+        color: tone
+    }
+
+    component ModuleDivider: Item {
+        implicitHeight: shell.moduleDividerHeight
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: parent.width
+            height: 1
+            color: theme.divider
         }
     }
 
@@ -320,614 +477,838 @@ Scope {
         id: usageBar
 
         property real value: 0
-        property color accent: "#7dcfff"
+        property color accent: theme.cpuAccent
+        property bool available: false
 
-        implicitHeight: 5
+        implicitHeight: 4
         radius: 0
-        color: "#30f5f7ff"
+        color: theme.usageTrack
+        opacity: available ? 1.0 : 0.3
 
         Rectangle {
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            width: parent.width * Math.min(1, Math.max(0,
-                usageBar.value / 100
-            ))
+            anchors {
+                top: parent.top
+                bottom: parent.bottom
+                left: parent.left
+            }
+            width: usageBar.available
+                ? parent.width * Math.min(1, Math.max(0,
+                    usageBar.value / 100))
+                : 0
             radius: 0
             color: usageBar.accent
         }
     }
 
-    component IconValue: Item {
-        property string symbol: ""
-        property string value: ""
+    component MetricCell: Column {
+        id: metricCell
 
-        implicitWidth: valueRow.implicitWidth
-        implicitHeight: valueRow.implicitHeight
+        required property string label
+        required property string valueText
+        property string unitText: ""
 
-        Row {
-            id: valueRow
-            anchors.centerIn: parent
-            spacing: 5
+        spacing: -1
+
+        Item {
+            width: parent.width
+            height: 11
 
             Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: symbol
-                color: "#c7cad5"
-                font.family: "Material Symbols Rounded"
-                font.pixelSize: 20
+                anchors.centerIn: parent
+                text: metricCell.label
+                color: theme.textMuted
+                font.family: shell.smallLabelFont
+                font.pixelSize: 9
+                font.weight: Font.Medium
+                font.letterSpacing: 0.5
+            }
+        }
+
+        Item {
+            width: parent.width
+            height: metricValueRow.implicitHeight
+
+            Row {
+                id: metricValueRow
+                anchors.centerIn: parent
+                spacing: 2
+
+                Text {
+                    id: metricValue
+                    text: metricCell.valueText
+                    color: theme.textPrimary
+                    font.family: shell.numericFont
+                    font.pixelSize: theme.metricValueSize
+                    font.weight: Font.Normal
+                }
+
+                Text {
+                    anchors.baseline: metricValue.baseline
+                    text: metricCell.unitText
+                    color: theme.textSecondary
+                    font.family: shell.numericFont
+                    font.pixelSize: theme.metricUnitSize
+                    font.weight: Font.Normal
+                }
+            }
+        }
+    }
+
+    component ModuleHeader: Item {
+        id: moduleHeader
+
+        property MetricsData metrics
+        required property string title
+        required property string platform
+        required property string detail
+
+        implicitHeight: 24
+
+        ModuleHeaderRail {
+            anchors {
+                left: parent.left
+                verticalCenter: parent.verticalCenter
+            }
+            tone: shell.moduleTone(moduleHeader.metrics)
+        }
+
+        Text {
+            anchors {
+                left: parent.left
+                leftMargin: 10
+                verticalCenter: parent.verticalCenter
+            }
+            text: moduleHeader.title
+            color: theme.textPrimary
+            font.family: shell.smallLabelFont
+            font.pixelSize: 17
+            font.weight: Font.Medium
+        }
+
+        Column {
+            anchors {
+                right: parent.right
+                verticalCenter: parent.verticalCenter
+            }
+            width: 138
+            spacing: -1
+
+            Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignRight
+                text: moduleHeader.platform
+                color: theme.textMuted
+                font.family: shell.smallLabelFont
+                font.pixelSize: 9
+                font.weight: Font.Medium
             }
 
             Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: value
-                textFormat: Text.StyledText
-                color: "#f5f7ff"
-                font.family: shell.numericFont
-                font.pixelSize: 16
+                width: parent.width
+                horizontalAlignment: Text.AlignRight
+                text: moduleHeader.detail
+                color: theme.textSecondary
+                font.family: shell.smallLabelFont
+                font.pixelSize: 9
+                font.weight: Font.Normal
+                elide: Text.ElideLeft
             }
         }
     }
 
     component ComputeSection: Column {
+        id: computeSection
+
+        required property string label
         property bool available: false
-        property string symbol: ""
-        property string label: ""
         property string modelName: ""
         property real usage: 0
         property var temperatureValue: null
         property var powerValue: null
-        property color accent: "#7dcfff"
+        property color accent: theme.cpuAccent
 
-        spacing: 4
+        spacing: 2
 
-        Item {
+        UI.SectionHeader {
             width: parent.width
-            height: 27
-
-            Row {
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 7
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: symbol
-                    color: accent
-                    font.family: "Material Symbols Rounded"
-                    font.pixelSize: 23
-                }
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: label
-                    color: "#f5f7ff"
-                    font.family: "Adwaita Sans"
-                    font.pixelSize: 18
-                    font.weight: Font.Medium
-                }
-            }
-
-        }
-
-        Text {
-            width: parent.width
-            text: modelName.length > 0
-                ? shell.compactModelName(modelName)
-                : "Model unavailable"
-            color: "#f5f7ff"
-            font.family: "Adwaita Sans"
-            font.pixelSize: 12
-            elide: Text.ElideRight
-            maximumLineCount: 1
+            label: computeSection.label
+            metadata: computeSection.modelName !== ""
+                ? shell.compactModelName(computeSection.modelName)
+                : "MODEL --"
         }
 
         Row {
             width: parent.width
 
-            IconValue {
-                width: parent.width / 2
-                symbol: "\uf076"
-                value: shell.temperature(temperatureValue)
+            MetricCell {
+                width: parent.width / 3
+                label: "LOAD"
+                valueText: shell.percentageValue(
+                    computeSection.usage,
+                    computeSection.available,
+                    0
+                )
+                unitText: "%"
             }
 
-            IconValue {
-                width: parent.width / 2
-                symbol: "\uea0b"
-                value: shell.power(powerValue)
-            }
-        }
-
-        UsageBar {
-            width: parent.width
-            value: parent.available ? parent.usage : 0
-            accent: parent.accent
-        }
-    }
-
-    component MemorySection: Column {
-        property bool available: false
-        property string symbol: ""
-        property string label: ""
-        property real used: 0
-        property real total: 0
-        property real usage: 0
-        property color accent: "#9ece6a"
-
-        spacing: 4
-
-        Item {
-            width: parent.width
-            height: 25
-
-            Row {
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 7
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: symbol
-                    color: accent
-                    font.family: "Material Symbols Rounded"
-                    font.pixelSize: 22
-                }
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: label
-                    color: "#f5f7ff"
-                    font.family: "Adwaita Sans"
-                    font.pixelSize: 17
-                    font.weight: Font.Medium
-                }
+            MetricCell {
+                width: parent.width / 3
+                label: "TEMP"
+                valueText: shell.metricValue(
+                    computeSection.temperatureValue,
+                    0
+                )
+                unitText: "°C"
             }
 
-            Text {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: shell.memoryAmount(used, total, available)
-                textFormat: Text.StyledText
-                color: "#f5f7ff"
-                font.family: shell.numericFont
-                font.pixelSize: 14
+            MetricCell {
+                width: parent.width / 3
+                label: "POWER"
+                valueText: shell.metricValue(
+                    computeSection.powerValue,
+                    0
+                )
+                unitText: "W"
             }
         }
 
         UsageBar {
             width: parent.width
-            value: parent.available ? parent.usage : 0
-            accent: parent.accent
+            value: Math.round(computeSection.usage)
+            accent: computeSection.accent
+            available: computeSection.available
         }
     }
 
-    component StorageVolumeSection: Column {
-        id: storageVolumeSection
+    component LocalComputeDevice: Column {
+        id: localComputeDevice
 
-        property string label: "STORAGE"
+        required property string label
+        property string detail: ""
+        property bool divided: false
         property bool available: false
-        property real used: 0
-        property real total: 0
         property real usage: 0
+        property var temperatureValue: null
+        property var powerValue: null
+        property color accent: theme.cpuAccent
 
-        spacing: 4
+        spacing: 0
 
-        Item {
+        ModuleDivider {
             width: parent.width
-            height: 25
+            visible: localComputeDevice.divided
+        }
 
-            Row {
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 7
+        Column {
+            width: parent.width
+            spacing: 2
 
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "\ue1db"
-                    color: "#e0af68"
-                    font.family: "Material Symbols Rounded"
-                    font.pixelSize: 21
-                }
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: storageVolumeSection.label
-                    color: "#f5f7ff"
-                    font.family: "Adwaita Sans"
-                    font.pixelSize: 15
-                    font.weight: Font.Medium
-                }
+            UI.SectionHeader {
+                width: parent.width
+                label: localComputeDevice.label
+                metadata: localComputeDevice.detail !== ""
+                    ? localComputeDevice.detail : "MODEL --"
+                metadataTone: localComputeDevice.available
+                    ? theme.textMuted : theme.textDisabled
             }
 
-            Text {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: storageVolumeSection.available
-                    ? shell.storageAmount(
-                        storageVolumeSection.used,
-                        storageVolumeSection.total,
-                        true
+            Row {
+                width: parent.width
+
+                MetricCell {
+                    width: parent.width / 3
+                    label: "LOAD"
+                    valueText: shell.percentageValue(
+                        localComputeDevice.usage,
+                        localComputeDevice.available,
+                        0
                     )
-                    : "NOT MOUNTED"
-                textFormat: Text.StyledText
-                color: storageVolumeSection.available
-                    ? "#f5f7ff" : "#8b8e99"
-                font.family: shell.numericFont
-                font.pixelSize: 13
-            }
-        }
+                    unitText: "%"
+                }
 
-        UsageBar {
-            width: parent.width
-            value: storageVolumeSection.available
-                ? storageVolumeSection.usage : 0
-            accent: "#e0af68"
+                MetricCell {
+                    width: parent.width / 3
+                    label: "TEMP"
+                    valueText: shell.metricValue(
+                        localComputeDevice.temperatureValue,
+                        0
+                    )
+                    unitText: "°C"
+                }
+
+                MetricCell {
+                    width: parent.width / 3
+                    label: "POWER"
+                    valueText: shell.metricValue(
+                        localComputeDevice.powerValue,
+                        0
+                    )
+                    unitText: "W"
+                }
+            }
+
+            UsageBar {
+                width: parent.width
+                value: Math.round(localComputeDevice.usage)
+                accent: localComputeDevice.accent
+                available: localComputeDevice.available
+            }
         }
     }
 
-    component CompactGpuSection: Column {
-        id: compactGpuSection
+    component LocalComputeSection: Column {
+        id: localComputeSection
 
-        property var gpu: ({})
-        property int deviceNumber: 1
-        readonly property bool gpuAvailable: gpu
-            && gpu.available === true
-        readonly property bool vramAvailable: gpu
-            && gpu.vram
-            && gpu.vram.available === true
-        readonly property bool sleeping: gpu
-            && gpu.runtimeStatus === "suspended"
+        property MetricsData metrics
+        readonly property int gpuCount:
+            metrics && Array.isArray(metrics.gpus)
+                ? metrics.gpus.length : 0
 
-        spacing: 4
+        spacing: 0
+
+        LocalComputeDevice {
+            width: parent.width
+            label: "CPU"
+            detail: localComputeSection.metrics.cpuModel !== ""
+                ? shell.compactModelName(
+                    localComputeSection.metrics.cpuModel)
+                : "MODEL --"
+            available: localComputeSection.metrics.cpuAvailable
+            usage: localComputeSection.metrics.cpuUsage
+            temperatureValue:
+                localComputeSection.metrics.cpuTemperature
+            powerValue: localComputeSection.metrics.cpuPower
+            accent: theme.cpuAccent
+        }
+
+        LocalComputeDevice {
+            width: parent.width
+            visible: localComputeSection.gpuCount === 0
+            label: "GPU 1"
+            detail: "SENSOR --"
+            divided: true
+            accent: theme.gpuAccent
+        }
+
+        Repeater {
+            model: localComputeSection.gpuCount
+
+            delegate: LocalComputeDevice {
+                required property int index
+
+                readonly property var gpu:
+                    localComputeSection.metrics.gpus[index]
+
+                width: localComputeSection.width
+                label: "GPU " + (index + 1)
+                detail: shell.localGpuDetail(gpu)
+                divided: true
+                available: gpu && gpu.available === true
+                usage: gpu ? gpu.usage : 0
+                temperatureValue: gpu ? gpu.temperature : null
+                powerValue: gpu ? gpu.power : null
+                accent: theme.gpuAccent
+            }
+        }
+    }
+
+    component LocalMemoryMetric: Column {
+        id: localMemoryMetric
+
+        required property string label
+        property bool available: false
+        property real used: 0
+        property real total: 0
+        property real usage: 0
+        property color accent: theme.ramAccent
+
+        spacing: -1
 
         Item {
             width: parent.width
-            height: 27
-
-            Row {
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 7
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "\ue30d"
-                    color: "#c099ff"
-                    font.family: "Material Symbols Rounded"
-                    font.pixelSize: 22
-                }
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "GPU " + compactGpuSection.deviceNumber
-                    color: "#f5f7ff"
-                    font.family: "Adwaita Sans"
-                    font.pixelSize: 18
-                    font.weight: Font.Medium
-                }
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: compactGpuSection.gpu
-                        && compactGpuSection.gpu.displayConnected === true
-                    text: "DISPLAY"
-                    color: "#9ece6a"
-                    font.family: shell.smallLabelFont
-                    font.pixelSize: 10
-                    font.weight: Font.Medium
-                    font.letterSpacing: 0.7
-                }
-            }
+            height: 11
 
             Text {
-                visible: compactGpuSection.sleeping
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: "SLEEP"
-                color: "#8b8e99"
-                font.family: "Adwaita Sans"
-                font.pixelSize: 18
+                anchors.centerIn: parent
+                text: localMemoryMetric.label
+                color: theme.textMuted
+                font.family: shell.smallLabelFont
+                font.pixelSize: 9
                 font.weight: Font.Medium
             }
         }
 
-        Text {
+        Item {
             width: parent.width
-            text: compactGpuSection.gpu
-                && typeof compactGpuSection.gpu.model === "string"
-                && compactGpuSection.gpu.model.length > 0
-                ? shell.compactModelName(compactGpuSection.gpu.model)
-                : "Model unavailable"
-            color: "#f5f7ff"
-            font.family: "Adwaita Sans"
-            font.pixelSize: 13
-            elide: Text.ElideRight
-            maximumLineCount: 1
+            height: localMemoryValueRow.implicitHeight
+
+            Row {
+                id: localMemoryValueRow
+                anchors.centerIn: parent
+                spacing: 2
+
+                Text {
+                    id: localMemoryValue
+                    text: shell.percentageValue(
+                        localMemoryMetric.usage,
+                        localMemoryMetric.available,
+                        0
+                    )
+                    color: localMemoryMetric.available
+                        ? theme.textPrimary : theme.textDisabled
+                    font.family: shell.numericFont
+                    font.pixelSize: theme.metricValueSize
+                    font.weight: Font.Normal
+                }
+
+                Text {
+                    anchors.baseline: localMemoryValue.baseline
+                    text: "%"
+                    color: localMemoryMetric.available
+                        ? theme.textSecondary : theme.textDisabled
+                    font.family: shell.numericFont
+                    font.pixelSize: theme.metricUnitSize
+                    font.weight: Font.Normal
+                }
+            }
         }
 
         Item {
             width: parent.width
-            height: 20
+            height: 13
 
             Text {
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                text: compactGpuSection.sleeping
-                    ? "POWER SAVING"
-                    : shell.temperature(compactGpuSection.gpu
-                        ? compactGpuSection.gpu.temperature : null)
-                        + "\u00a0\u00a0·\u00a0\u00a0"
-                        + shell.power(compactGpuSection.gpu
-                            ? compactGpuSection.gpu.power : null)
-                textFormat: Text.StyledText
-                color: "#c7cad5"
-                font.family: shell.numericFont
-                font.pixelSize: 13
-            }
-
-            Text {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: shell.memoryAmount(
-                    compactGpuSection.vramAvailable
-                        ? compactGpuSection.gpu.vram.used : 0,
-                    compactGpuSection.vramAvailable
-                        ? compactGpuSection.gpu.vram.total : 0,
-                    compactGpuSection.vramAvailable
+                anchors.centerIn: parent
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: shell.capacitySummary(
+                    localMemoryMetric.used,
+                    localMemoryMetric.total,
+                    localMemoryMetric.available
                 )
-                textFormat: Text.StyledText
-                color: "#f5f7ff"
-                font.family: shell.numericFont
-                font.pixelSize: 13
+                color: localMemoryMetric.available
+                    ? theme.textSecondary : theme.textDisabled
+                font.family: shell.smallLabelFont
+                font.pixelSize: 9
+                font.weight: Font.Normal
+                elide: Text.ElideRight
             }
+        }
+
+        Item {
+            width: parent.width
+            height: 4
+
+            UsageBar {
+                anchors {
+                    fill: parent
+                    leftMargin: 6
+                    rightMargin: 6
+                }
+                value: Math.round(localMemoryMetric.usage)
+                accent: localMemoryMetric.accent
+                available: localMemoryMetric.available
+            }
+        }
+    }
+
+    component LocalMemorySection: Column {
+        id: localMemorySection
+
+        property MetricsData metrics
+        readonly property int gpuCount:
+            metrics && Array.isArray(metrics.gpus)
+                ? metrics.gpus.length : 0
+
+        spacing: 0
+
+        UI.SectionHeader {
+            width: parent.width
+            label: "MEMORY"
+        }
+
+        Flow {
+            id: localMemoryFlow
+
+            width: parent.width
+            spacing: 0
+
+            LocalMemoryMetric {
+                width: localMemoryFlow.width / 3
+                label: "RAM"
+                available: localMemorySection.metrics.memoryAvailable
+                used: localMemorySection.metrics.memoryUsed
+                total: localMemorySection.metrics.memoryTotal
+                usage: localMemorySection.metrics.memoryUsage
+                accent: theme.ramAccent
+            }
+
+            LocalMemoryMetric {
+                width: localMemoryFlow.width / 3
+                visible: localMemorySection.gpuCount === 0
+                label: "VRAM 1"
+                accent: theme.vramAccent
+            }
+
+            Repeater {
+                model: localMemorySection.gpuCount
+
+                delegate: LocalMemoryMetric {
+                    required property int index
+
+                    readonly property var gpu:
+                        localMemorySection.metrics.gpus[index]
+                    readonly property bool vramAvailable:
+                        gpu && gpu.vram && gpu.vram.available === true
+
+                    width: localMemoryFlow.width / 3
+                    label: "VRAM " + (index + 1)
+                    available: vramAvailable
+                    used: vramAvailable ? gpu.vram.used : 0
+                    total: vramAvailable ? gpu.vram.total : 0
+                    usage: vramAvailable ? gpu.vram.usage : 0
+                    accent: theme.vramAccent
+                }
+            }
+        }
+    }
+
+    component LocalCapacityRow: Column {
+        id: localCapacityRow
+
+        required property string label
+        property bool available: false
+        property real used: 0
+        property real total: 0
+        property string unavailableText: "-- / -- GiB"
+        property real usage: 0
+        property color accent: theme.ramAccent
+
+        spacing: 2
+
+        Item {
+            width: parent.width
+            height: 18
+
+            Text {
+                anchors {
+                    left: parent.left
+                    verticalCenter: parent.verticalCenter
+                }
+                text: localCapacityRow.label
+                color: localCapacityRow.available
+                    ? theme.textSecondary : theme.textDisabled
+                font.family: shell.smallLabelFont
+                font.pixelSize: 11
+                font.weight: Font.Medium
+            }
+
+            Text {
+                anchors {
+                    right: parent.right
+                    verticalCenter: parent.verticalCenter
+                }
+                text: localCapacityRow.available
+                    ? shell.capacitySummary(
+                        localCapacityRow.used,
+                        localCapacityRow.total,
+                        true
+                    )
+                    : localCapacityRow.unavailableText
+                color: localCapacityRow.available
+                    ? theme.textPrimary : theme.textDisabled
+                font.family: shell.smallLabelFont
+                font.pixelSize: 10
+                font.weight: Font.Normal
+            }
+        }
+
+        UsageBar {
+            width: parent.width
+            value: localCapacityRow.usage
+            accent: localCapacityRow.accent
+            available: localCapacityRow.available
+            opacity: localCapacityRow.available ? 1.0 : 0.0
+        }
+    }
+
+    component LocalStorageSection: Column {
+        id: localStorageSection
+
+        property MetricsData metrics
+
+        spacing: 3
+
+        UI.SectionHeader {
+            width: parent.width
+            label: "STORAGE"
+        }
+
+        LocalCapacityRow {
+            width: parent.width
+            label: "ROOT"
+            available: localStorageSection.metrics.storageAvailable
+            used: localStorageSection.metrics.storageUsed
+            total: localStorageSection.metrics.storageTotal
+            unavailableText: localStorageSection.metrics.storageKnown
+                ? "SENSOR --" : "-- / -- GiB"
+            usage: localStorageSection.metrics.storageUsage
+            accent: theme.storageAccent
+        }
+
+        Repeater {
+            model: localStorageSection.metrics.storageVolumes
+
+            delegate: LocalCapacityRow {
+                required property var modelData
+
+                width: localStorageSection.width
+                label: modelData.label
+                    + (modelData.kind !== ""
+                            && modelData.kind.toUpperCase()
+                                !== modelData.label.toUpperCase()
+                        ? " · " + modelData.kind.toUpperCase()
+                        : "")
+                available: modelData.available
+                used: modelData.used
+                total: modelData.total
+                unavailableText: "NOT MOUNTED"
+                usage: modelData.usage
+                accent: theme.storageAccent
+            }
+        }
+    }
+
+    component NetworkSection: Column {
+        id: networkSection
+
+        property MetricsData metrics
+
+        spacing: 2
+
+        UI.SectionHeader {
+            width: parent.width
+            label: "NETWORK"
+            metadata: networkSection.metrics.networkInterface !== ""
+                ? networkSection.metrics.networkInterface
+                : "INTERFACE --"
+        }
+
+        Row {
+            width: parent.width
+
+            MetricCell {
+                width: parent.width / 2
+                label: "DOWNLOAD"
+                valueText: shell.byteRateValue(
+                    networkSection.metrics.networkDownload,
+                    networkSection.metrics.networkAvailable
+                )
+                unitText: shell.byteRateUnit(
+                    networkSection.metrics.networkDownload,
+                    networkSection.metrics.networkAvailable
+                )
+            }
+
+            MetricCell {
+                width: parent.width / 2
+                label: "UPLOAD"
+                valueText: shell.byteRateValue(
+                    networkSection.metrics.networkUpload,
+                    networkSection.metrics.networkAvailable
+                )
+                unitText: shell.byteRateUnit(
+                    networkSection.metrics.networkUpload,
+                    networkSection.metrics.networkAvailable
+                )
+            }
+        }
+    }
+
+    component MemoryPair: Column {
+        id: memoryPair
+
+        required property string label
+        property bool available: false
+        property real used: 0
+        property real total: 0
+        property real usage: 0
+        property color accent: theme.ramAccent
+
+        spacing: 2
+
+        Item {
+            width: parent.width
+            height: 30
+
+            Text {
+                anchors {
+                    left: parent.left
+                    top: parent.top
+                }
+                text: memoryPair.label
+                color: theme.textMuted
+                font.family: shell.smallLabelFont
+                font.pixelSize: 10
+                font.weight: Font.Medium
+            }
+
+            Row {
+                anchors {
+                    right: parent.right
+                    top: parent.top
+                    topMargin: -3
+                }
+                spacing: 2
+
+                Text {
+                    id: memoryPercent
+                    text: shell.percentageValue(
+                        memoryPair.usage,
+                        memoryPair.available,
+                        0
+                    )
+                    color: theme.textPrimary
+                    font.family: shell.numericFont
+                    font.pixelSize: theme.metricValueSize
+                    font.weight: Font.Normal
+                }
+
+                Text {
+                    anchors.baseline: memoryPercent.baseline
+                    text: "%"
+                    color: theme.textSecondary
+                    font.family: shell.numericFont
+                    font.pixelSize: theme.metricUnitSize
+                }
+            }
+
+            Text {
+                anchors {
+                    left: parent.left
+                    bottom: parent.bottom
+                }
+                text: memoryPair.available
+                    ? shell.gibibytes(memoryPair.used) + " / "
+                        + shell.gibibytes(memoryPair.total) + " GiB"
+                    : "-- / -- GiB"
+                color: theme.textSecondary
+                font.family: shell.smallLabelFont
+                font.pixelSize: 9
+                font.weight: Font.Normal
+            }
+        }
+
+        UsageBar {
+            width: parent.width
+            value: Math.round(memoryPair.usage)
+            accent: memoryPair.accent
+            available: memoryPair.available
+        }
+    }
+
+    component MemoryComparisonSection: Column {
+        id: memoryComparisonSection
+
+        property MetricsData metrics
+
+        spacing: 2
+
+        UI.SectionHeader {
+            width: parent.width
+            label: "MEMORY"
+            metadata: "RAM · VRAM"
         }
 
         Row {
             width: parent.width
             spacing: 12
 
-            Column {
-                width: (parent.width - parent.spacing) / 2
-                spacing: 3
-
-                Text {
-                    text: "LOAD"
-                    color: "#8b8e99"
-                    font.family: shell.smallLabelFont
-                    font.pixelSize: 10
-                    font.weight: Font.Medium
-                    font.letterSpacing: 0.6
-                }
-
-                UsageBar {
-                    width: parent.width
-                    value: compactGpuSection.gpuAvailable
-                        ? compactGpuSection.gpu.usage : 0
-                    accent: "#c099ff"
-                }
+            MemoryPair {
+                width: (parent.width - 12) / 2
+                label: "RAM"
+                available: memoryComparisonSection.metrics.memoryAvailable
+                used: memoryComparisonSection.metrics.memoryUsed
+                total: memoryComparisonSection.metrics.memoryTotal
+                usage: memoryComparisonSection.metrics.memoryUsage
+                accent: theme.ramAccent
             }
 
-            Column {
-                width: (parent.width - parent.spacing) / 2
-                spacing: 3
-
-                Text {
-                    text: "VRAM"
-                    color: "#8b8e99"
-                    font.family: shell.smallLabelFont
-                    font.pixelSize: 10
-                    font.weight: Font.Medium
-                    font.letterSpacing: 0.6
-                }
-
-                UsageBar {
-                    width: parent.width
-                    value: compactGpuSection.vramAvailable
-                        ? compactGpuSection.gpu.vram.usage : 0
-                    accent: "#ff9e64"
-                }
+            MemoryPair {
+                width: (parent.width - 12) / 2
+                label: "VRAM"
+                available: memoryComparisonSection.metrics.vramAvailable
+                used: memoryComparisonSection.metrics.vramUsed
+                total: memoryComparisonSection.metrics.vramTotal
+                usage: memoryComparisonSection.metrics.vramUsage
+                accent: theme.vramAccent
             }
         }
     }
 
-    component GraphicsSection: Column {
-        id: graphicsSection
+    component LocalSystemPanel: Rectangle {
+        id: localSystemPanel
 
-        property var gpus: []
-        readonly property int deviceCount: Array.isArray(gpus)
-            ? gpus.length : 0
-
-        spacing: 7
-
-        Item {
-            width: parent.width
-            height: 15
-
-            Text {
-                anchors.left: parent.left
-                text: "GRAPHICS"
-                color: "#c7cad5"
-                font.family: shell.smallLabelFont
-                font.pixelSize: 11
-                font.weight: Font.Medium
-                font.letterSpacing: 0.8
-            }
-
-            Text {
-                anchors.right: parent.right
-                text: graphicsSection.deviceCount + " DEVICES"
-                color: "#8b8e99"
-                font.family: shell.smallLabelFont
-                font.pixelSize: 10
-                font.weight: Font.Medium
-                font.letterSpacing: 0.6
-            }
-        }
-
-        Repeater {
-            model: graphicsSection.deviceCount
-
-            delegate: CompactGpuSection {
-                required property int index
-
-                width: graphicsSection.width
-                gpu: graphicsSection.gpus[index]
-                deviceNumber: index + 1
-            }
-        }
-
-        Text {
-            visible: graphicsSection.deviceCount === 0
-            text: "NO GPU DATA"
-            color: "#8b8e99"
-            font.family: "Adwaita Sans"
-            font.pixelSize: 11
-            font.weight: Font.Medium
-            font.letterSpacing: 0.7
-        }
-    }
-
-    component FreshnessStatus: Row {
         property MetricsData metrics
 
-        spacing: 7
-
-        Rectangle {
-            anchors.verticalCenter: parent.verticalCenter
-            width: 11
-            height: 11
-            radius: 0
-            color: metrics.fresh ? "#9ece6a" : "#f7768e"
-        }
-
-        Text {
-            text: metrics.fresh ? "LIVE" : "NO SIGNAL"
-            color: metrics.fresh ? "#b9d99d" : "#efa0ad"
-            font.family: shell.smallLabelFont
-            font.pixelSize: 12
-            font.weight: Font.Medium
-            font.letterSpacing: 0.7
-        }
-    }
-
-    component PerformanceCard: Rectangle {
-        id: performanceCard
-
-        property string deviceName: ""
-        property string platform: ""
-        property MetricsData metrics
-        property Component statusComponent: null
-        property bool zeroValuesWhenStale: false
-        readonly property bool showingZeroValues:
-            zeroValuesWhenStale && !metrics.fresh
-        readonly property bool valuesAvailable:
-            metrics.available || showingZeroValues
-        readonly property real contentOpacity:
-            showingZeroValues ? 0.38 : 1.0
-
-        function displayedValue(value) {
-            return showingZeroValues ? 0 : value;
-        }
-
-        implicitWidth: 312
-        implicitHeight: cardContent.implicitHeight + 28
+        implicitWidth: shell.panelWidth
+        implicitHeight: localSystemContent.implicitHeight
+            + shell.panelInset * 2
         radius: 0
-        color: shell.panelBackground
+        color: theme.panelBackground
         border.width: 0
 
         Column {
-            id: cardContent
+            id: localSystemContent
             anchors.centerIn: parent
             width: shell.panelContentWidth
-            spacing: shell.cardSectionSpacing
+            spacing: 0
 
-            Item {
+            ModuleHeader {
                 width: parent.width
-                height: 37
-
-                Column {
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    opacity: performanceCard.contentOpacity
-                    spacing: 0
-
-                    Text {
-                        text: deviceName
-                        color: "#f5f7ff"
-                        font.family: "Noto Sans JP"
-                        font.pixelSize: shell.panelTitleSize
-                        font.weight: Font.Medium
-                    }
-
-                    Text {
-                        text: platform
-                        color: "#f5f7ff"
-                        font.family: shell.smallLabelFont
-                        font.pixelSize: 11
-                        font.weight: Font.Medium
-                        font.letterSpacing: 0.8
-                    }
-                }
-
-                Loader {
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    sourceComponent: performanceCard.statusComponent
-                }
-            }
-
-            ComputeSection {
-                width: parent.width
-                opacity: performanceCard.contentOpacity
-                available: performanceCard.valuesAvailable
-                symbol: "\ue322"
-                label: "CPU"
-                modelName: metrics.cpuModel
-                usage: performanceCard.displayedValue(metrics.cpuUsage)
-                temperatureValue: performanceCard.displayedValue(
-                    metrics.cpuTemperature
+                metrics: localSystemPanel.metrics
+                title: "LOCAL SYSTEM"
+                platform: "ARCH LINUX"
+                detail: shell.uptime(
+                    localSystemPanel.metrics.uptimeSeconds,
+                    localSystemPanel.metrics.uptimeAvailable
                 )
-                powerValue: performanceCard.displayedValue(metrics.cpuPower)
-                accent: "#7dcfff"
             }
 
-            ComputeSection {
+            ModuleDivider {
                 width: parent.width
-                opacity: performanceCard.contentOpacity
-                available: performanceCard.valuesAvailable
-                symbol: "\ue30d"
-                label: "GPU"
-                modelName: metrics.gpuModel
-                usage: performanceCard.displayedValue(metrics.gpuUsage)
-                temperatureValue: performanceCard.displayedValue(
-                    metrics.gpuTemperature
-                )
-                powerValue: performanceCard.displayedValue(metrics.gpuPower)
-                accent: "#c099ff"
             }
 
-            MemorySection {
+            LocalComputeSection {
                 width: parent.width
-                opacity: performanceCard.contentOpacity
-                available: performanceCard.valuesAvailable
-                symbol: "\uf7a3"
-                label: "RAM"
-                used: performanceCard.displayedValue(metrics.memoryUsed)
-                total: performanceCard.displayedValue(metrics.memoryTotal)
-                usage: performanceCard.displayedValue(metrics.memoryUsage)
-                accent: "#9ece6a"
+                metrics: localSystemPanel.metrics
             }
 
-            MemorySection {
+            ModuleDivider {
                 width: parent.width
-                opacity: performanceCard.contentOpacity
-                available: performanceCard.valuesAvailable
-                symbol: "\ue875"
-                label: "VRAM"
-                used: performanceCard.displayedValue(metrics.vramUsed)
-                total: performanceCard.displayedValue(metrics.vramTotal)
-                usage: performanceCard.displayedValue(metrics.vramUsage)
-                accent: "#ff9e64"
+            }
+
+            LocalMemorySection {
+                width: parent.width
+                metrics: localSystemPanel.metrics
+            }
+
+            ModuleDivider {
+                width: parent.width
+            }
+
+            LocalStorageSection {
+                width: parent.width
+                metrics: localSystemPanel.metrics
+            }
+
+            ModuleDivider {
+                width: parent.width
+            }
+
+            NetworkSection {
+                width: parent.width
+                metrics: localSystemPanel.metrics
             }
         }
 
@@ -937,184 +1318,76 @@ Scope {
         }
     }
 
-    component SystemSummarySection: Column {
-        id: systemSummarySection
-
-        property MetricsData metrics
-        property string title: "SYSTEM"
-        property string platform: ""
-        readonly property int storageVolumeCount: metrics
-            && Array.isArray(metrics.storageVolumes)
-            ? metrics.storageVolumes.length : 0
-
-        spacing: 7
-
-        Item {
-            width: parent.width
-            height: 37
-
-            Column {
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 0
-
-                Text {
-                    text: title
-                    color: "#f5f7ff"
-                    font.family: "Adwaita Sans"
-                    font.pixelSize: shell.panelTitleSize
-                    font.weight: Font.Medium
-                    font.letterSpacing: 0.9
-                }
-
-                Text {
-                    text: platform
-                    color: "#f5f7ff"
-                    font.family: shell.smallLabelFont
-                    font.pixelSize: 11
-                    font.weight: Font.Medium
-                    font.letterSpacing: 0.8
-                }
-            }
-
-            Text {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: shell.uptime(metrics.uptimeSeconds, metrics.uptimeAvailable)
-                color: "#c7cad5"
-                font.family: shell.smallLabelFont
-                font.pixelSize: 11
-                font.weight: Font.Medium
-                font.letterSpacing: 0.6
-            }
-        }
-
-        Text {
-            width: parent.width
-            text: "STORAGE"
-            color: "#c7cad5"
-            font.family: shell.smallLabelFont
-            font.pixelSize: 10
-            font.weight: Font.Medium
-            font.letterSpacing: 0.8
-        }
-
-        StorageVolumeSection {
-            width: parent.width
-            label: "ROOT"
-            available: metrics.storageAvailable
-            used: metrics.storageUsed
-            total: metrics.storageTotal
-            usage: metrics.storageUsage
-        }
-
-        Repeater {
-            model: systemSummarySection.storageVolumeCount
-
-            delegate: StorageVolumeSection {
-                required property int index
-                readonly property var volume:
-                    systemSummarySection.metrics.storageVolumes[index]
-
-                width: systemSummarySection.width
-                label: volume.label
-                available: volume.available
-                used: volume.used
-                total: volume.total
-                usage: volume.usage
-            }
-        }
-
-        Item {
-            width: parent.width
-            height: 25
-
-            Text {
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                text: "NETWORK"
-                color: "#c7cad5"
-                font.family: shell.smallLabelFont
-                font.pixelSize: 11
-                font.weight: Font.Medium
-                font.letterSpacing: 0.7
-            }
-
-            Text {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: "↓ " + shell.byteRate(
-                    metrics.networkDownload,
-                    metrics.networkAvailable
-                ) + "\u00a0\u00a0\u00a0\u00a0↑ " + shell.byteRate(
-                    metrics.networkUpload,
-                    metrics.networkAvailable
-                )
-                textFormat: Text.StyledText
-                color: "#f5f7ff"
-                font.family: shell.numericFont
-                font.pixelSize: 13
-            }
-        }
-    }
-
-    component LocalSystemCard: Rectangle {
-        id: localSystemCard
+    component RemoteSystemPanel: Rectangle {
+        id: remoteSystemPanel
 
         property MetricsData metrics
 
-        implicitWidth: 312
-        implicitHeight: localSystemContent.implicitHeight + 28
+        implicitWidth: shell.panelWidth
+        implicitHeight: remoteSystemContent.implicitHeight
+            + shell.panelInset * 2
         radius: 0
-        color: shell.panelBackground
+        color: theme.panelBackground
         border.width: 0
 
         Column {
-            id: localSystemContent
-
+            id: remoteSystemContent
             anchors.centerIn: parent
             width: shell.panelContentWidth
-            spacing: shell.cardSectionSpacing
+            spacing: 0
 
-            SystemSummarySection {
+            ModuleHeader {
                 width: parent.width
-                metrics: localSystemCard.metrics
-                title: "LOCAL SYSTEM"
-                platform: "LINUX · ARCH"
+                metrics: remoteSystemPanel.metrics
+                title: "MAIN PC"
+                platform: "WINDOWS"
+                detail: remoteSystemPanel.metrics.available
+                    ? "HOST "
+                        + (remoteSystemPanel.metrics.host !== ""
+                            ? remoteSystemPanel.metrics.host.toUpperCase()
+                            : "--")
+                    : "HOST --"
             }
 
-            Rectangle {
+            ModuleDivider {
                 width: parent.width
-                height: 1
-                color: shell.dividerColor
             }
 
             ComputeSection {
                 width: parent.width
-                available: localSystemCard.metrics.available
-                symbol: "\ue322"
                 label: "CPU"
-                modelName: localSystemCard.metrics.cpuModel
-                usage: localSystemCard.metrics.cpuUsage
-                temperatureValue: localSystemCard.metrics.cpuTemperature
-                powerValue: localSystemCard.metrics.cpuPower
-                accent: "#7dcfff"
+                available: remoteSystemPanel.metrics.cpuAvailable
+                modelName: remoteSystemPanel.metrics.cpuModel
+                usage: remoteSystemPanel.metrics.cpuUsage
+                temperatureValue:
+                    remoteSystemPanel.metrics.cpuTemperature
+                powerValue: remoteSystemPanel.metrics.cpuPower
+                accent: theme.cpuAccent
             }
 
-            MemorySection {
+            ModuleDivider {
                 width: parent.width
-                available: localSystemCard.metrics.available
-                symbol: "\uf7a3"
-                label: "RAM"
-                used: localSystemCard.metrics.memoryUsed
-                total: localSystemCard.metrics.memoryTotal
-                usage: localSystemCard.metrics.memoryUsage
-                accent: "#9ece6a"
             }
 
-            GraphicsSection {
+            ComputeSection {
                 width: parent.width
-                gpus: localSystemCard.metrics.gpus
+                label: "GPU"
+                available: remoteSystemPanel.metrics.gpuAvailable
+                modelName: remoteSystemPanel.metrics.gpuModel
+                usage: remoteSystemPanel.metrics.gpuUsage
+                temperatureValue:
+                    remoteSystemPanel.metrics.gpuTemperature
+                powerValue: remoteSystemPanel.metrics.gpuPower
+                accent: theme.gpuAccent
+            }
+
+            ModuleDivider {
+                width: parent.width
+            }
+
+            MemoryComparisonSection {
+                width: parent.width
+                metrics: remoteSystemPanel.metrics
             }
         }
 
@@ -1139,7 +1412,7 @@ Scope {
             left: 12
         }
 
-        implicitWidth: cards.implicitWidth
+        implicitWidth: shell.panelWidth
         color: "transparent"
         exclusiveZone: 0
         focusable: false
@@ -1150,13 +1423,13 @@ Scope {
             readonly property real cardSpacing: Math.max(0,
                 height
                 - localSystem.implicitHeight
-                - mainPerformance.implicitHeight
+                - mainSystem.implicitHeight
             )
 
             anchors.fill: parent
             spacing: 0
 
-            LocalSystemCard {
+            LocalSystemPanel {
                 id: localSystem
                 metrics: localData
             }
@@ -1166,17 +1439,9 @@ Scope {
                 height: cards.cardSpacing
             }
 
-            PerformanceCard {
-                id: mainPerformance
-                deviceName: "Main PC"
-                platform: "WINDOWS"
+            RemoteSystemPanel {
+                id: mainSystem
                 metrics: remoteData
-                zeroValuesWhenStale: true
-                statusComponent: Component {
-                    FreshnessStatus {
-                        metrics: remoteData
-                    }
-                }
             }
         }
     }
@@ -1187,7 +1452,7 @@ Scope {
             "-B",
             shell.performanceScriptsDir + "/system_metrics.py",
             "--interval",
-            "2",
+            shell.pollIntervalSeconds.toString(),
             "--machine-config",
             shell.machineConfigPath
         ]
@@ -1208,7 +1473,7 @@ Scope {
             "--config",
             shell.remoteConfigPath,
             "--interval",
-            "2",
+            shell.pollIntervalSeconds.toString(),
             "--automation",
             "--automation-settings",
             shell.automationSettingsPath,
@@ -1224,14 +1489,9 @@ Scope {
     }
 
     Timer {
-        interval: 2000
+        interval: shell.pollIntervalSeconds * 1000
         running: true
         repeat: true
-        onTriggered: {
-            if (localData.available && Date.now() - localData.lastUpdateMs > 6000)
-                localData.fresh = false;
-            if (remoteData.available && Date.now() - remoteData.lastUpdateMs > 6000)
-                remoteData.fresh = false;
-        }
+        onTriggered: shell.nowMs = Date.now()
     }
 }
