@@ -10,3 +10,12 @@ memories = true
 generate_memories = true
 use_memories = true
 disable_on_external_context = true
+
+[projects."/home/muray"]
+trust_level = "trusted"
+
+[projects."/"]
+trust_level = "trusted"
+
+[projects."/mnt"]
+trust_level = "trusted"

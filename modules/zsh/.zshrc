@@ -77,3 +77,4 @@ fi
 
 # Machine-local settings are deliberately outside Git.
 [[ -r "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"
+export PATH="$HOME/.local/share/npm/bin:$PATH"

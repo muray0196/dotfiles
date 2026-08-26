@@ -25,14 +25,21 @@ DEFAULT_RUNTIME_STATE = (
 )
 BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 HYPRCTL = "/usr/bin/hyprctl"
+QUICKSHELL = "/usr/bin/qs"
+QUICKSHELL_WIDGET_CONFIGS = ("clock", "performance")
 DPMS_OFF_DISPATCH = 'hl.dsp.dpms("off")'
 DPMS_ON_DISPATCH = 'hl.dsp.dpms("on")'
 DDCUTIL = "/usr/bin/ddcutil"
 DISPLAY_STATE_POLL_SECONDS = 1.0
+DISPLAY_ON_RETRY_SECONDS = 5.0
+PHYSICAL_POWER_POLL_SECONDS = 10.0
+PHYSICAL_POWER_PROBE_TIMEOUT_SECONDS = 2.0
+PHYSICAL_POWER_FAILURE_THRESHOLD = 3
 HYPRLAND_SOCKET_TIMEOUT = 0.5
 
 CommandRunner = Callable[[Sequence[str]], bool]
 DisplayPowerReader = Callable[[], bool]
+DdcPowerProbeStarter = Callable[[int], subprocess.Popen[str]]
 
 
 @dataclass(frozen=True)
@@ -213,6 +220,9 @@ def read_display_power_off() -> bool:
             raise ValueError("Hyprland monitor DPMS state is missing")
         active_statuses.append(dpms_status)
 
+    if not active_statuses:
+        raise ValueError("Hyprland has no active monitors")
+
     return not any(active_statuses)
 
 
@@ -220,6 +230,62 @@ def waywallen_dispatch(action: str, control_path: Path) -> str:
     if action not in {"on", "off"}:
         raise ValueError("Waywallen action must be on or off")
     return f'hl.dsp.exec_cmd("{control_path} {action}")'
+
+
+def quickshell_widgets_command(config: str, visible: bool) -> list[str]:
+    action = "showWidgets" if visible else "hideWidgets"
+    return [
+        QUICKSHELL,
+        "--no-color",
+        "ipc",
+        "-c",
+        config,
+        "--any-display",
+        "call",
+        "widgets",
+        action,
+    ]
+
+
+def parse_ddc_power_off(output: str) -> bool:
+    """Return the monitor power state from terse VCP D6 output."""
+    value = next(
+        (
+            token.lower()
+            for token in output.split()
+            if len(token) == 3
+            and token[0].lower() == "x"
+            and all(
+                character in "0123456789abcdefABCDEF"
+                for character in token[1:]
+            )
+        ),
+        None,
+    )
+    if value == "x01":
+        return False
+    if value in {"x02", "x03", "x04", "x05"}:
+        return True
+    raise ValueError("DDC/CI power response is missing a recognized VCP D6 value")
+
+
+def start_ddc_power_probe(bus: int) -> subprocess.Popen[str]:
+    """Start a short DDC/CI power query without blocking the heartbeat loop."""
+    return subprocess.Popen(
+        [
+            DDCUTIL,
+            "--maxtries=1,1,1",
+            "--sleep-multiplier=.1",
+            "--bus",
+            str(bus),
+            "getvcp",
+            "D6",
+            "--terse",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
 
 
 def run_command(command: Sequence[str]) -> bool:
@@ -273,6 +339,7 @@ class DesktopAutomation:
         now: Callable[[], datetime] = datetime.now,
         command_runner: CommandRunner = run_command,
         display_power_reader: DisplayPowerReader = read_display_power_off,
+        ddc_power_probe_starter: DdcPowerProbeStarter = start_ddc_power_probe,
         machine_config: MachineConfig = DISABLED_MACHINE_CONFIG,
     ) -> None:
         if offline_after <= 0:
@@ -286,6 +353,7 @@ class DesktopAutomation:
         self._now = now
         self._command_runner = command_runner
         self._display_power_reader = display_power_reader
+        self._ddc_power_probe_starter = ddc_power_probe_starter
         self._machine_config = machine_config
         self._started_at = monotonic()
         self._last_heartbeat: float | None = None
@@ -294,15 +362,25 @@ class DesktopAutomation:
         self._display_schedule = DEFAULT_DISPLAY_SCHEDULE
         self._waywallen_link_enabled = True
         self._waywallen_applied: bool | None = None
+        self._widgets_applied: bool | None = None
         self._brightness_applied: int | None = None
         self._brightness_retry_at = 0.0
         self._settings_error: str | None = None
         self._runtime_error: str | None = None
         self._display_state_error: str | None = None
         self._display_state_poll_at = 0.0
+        self._hyprland_display_power_off: bool | None = None
+        self._physical_display_power_off: bool | None = None
+        self._physical_power_failures = 0
+        self._physical_power_probe: subprocess.Popen[str] | None = None
+        self._physical_power_probe_started_at = 0.0
+        self._physical_power_probe_at = 0.0
         self._display_power_off: bool | None = None
         self._display_off_pending = False
         self._display_on_pending = False
+        self._display_on_retry_at = (
+            self._started_at + DISPLAY_ON_RETRY_SECONDS
+        )
         self._restore_runtime_state()
 
     def _restore_runtime_state(self) -> None:
@@ -359,6 +437,7 @@ class DesktopAutomation:
         current = self._monotonic()
         self._sync_display_window()
         self._sync_display_power_state(current)
+        self._sync_physical_display_power_state(current)
 
         if self._last_heartbeat is None:
             if current - self._started_at >= self.offline_after:
@@ -425,6 +504,11 @@ class DesktopAutomation:
             return
         if self._main_pc_online is None or self._display_power_off is True:
             return
+        if self._physical_power_detection_enabled() and (
+            self._physical_display_power_off is None
+            or self._physical_power_probe is not None
+        ):
+            return
 
         desired = (
             machine.online_brightness
@@ -468,7 +552,6 @@ class DesktopAutomation:
         else:
             self._display_off_pending = False
             self._display_on_pending = True
-            self._turn_display_on()
         self._persist_runtime_state()
 
     def _sync_display_power_state(self, current: float) -> None:
@@ -492,14 +575,161 @@ class DesktopAutomation:
             return
 
         self._display_state_error = None
-        if display_power_off == self._display_power_off:
+        display_on_confirmed = not display_power_off and self._display_on_pending
+        if display_on_confirmed:
+            # A successful dispatch only means Hyprland accepted the command;
+            # during startup the connector may not exist yet. Stop retrying
+            # only after an active monitor is actually observed on.
+            self._display_on_pending = False
+            self._display_on_retry_at = 0.0
+        previous = self._hyprland_display_power_off
+        self._hyprland_display_power_off = display_power_off
+        if display_power_off != previous:
+            self._physical_display_power_off = None
+            self._physical_power_failures = 0
+            if not display_power_off:
+                self._physical_power_probe_at = current
+
+        self._reconcile_effective_display_power_state()
+        if display_on_confirmed:
+            self._persist_runtime_state()
+
+    def _physical_power_detection_enabled(self) -> bool:
+        machine = self._machine_config
+        return (
+            machine.physical_power_detection_enabled
+            and machine.ddc_enabled
+            and machine.ddc_bus is not None
+        )
+
+    def _sync_physical_display_power_state(self, current: float) -> None:
+        probe = self._physical_power_probe
+        if probe is not None:
+            returncode = probe.poll()
+            timed_out = (
+                returncode is None
+                and current - self._physical_power_probe_started_at
+                >= PHYSICAL_POWER_PROBE_TIMEOUT_SECONDS
+            )
+            if returncode is None and not timed_out:
+                return
+            if timed_out:
+                probe.kill()
+            output, _ = probe.communicate()
+            self._physical_power_probe = None
+
+            if self._hyprland_display_power_off is False:
+                if not timed_out and probe.returncode == 0:
+                    try:
+                        physical_power_off = parse_ddc_power_off(output or "")
+                    except ValueError:
+                        self._record_physical_power_probe_failure()
+                    else:
+                        self._record_physical_power_state(physical_power_off)
+                else:
+                    self._record_physical_power_probe_failure()
+
+        if not self._physical_power_detection_enabled():
+            return
+        if self._hyprland_display_power_off is not False:
+            return
+        if self._physical_power_probe is not None:
+            return
+        if current < self._physical_power_probe_at:
             return
 
-        self._display_power_off = display_power_off
-        if not display_power_off:
+        bus = self._machine_config.ddc_bus
+        if bus is None:
+            return
+        try:
+            self._physical_power_probe = self._ddc_power_probe_starter(bus)
+        except OSError:
+            self._physical_power_probe_at = current + PHYSICAL_POWER_POLL_SECONDS
+            self._record_physical_power_probe_failure()
+            return
+        self._physical_power_probe_started_at = current
+        self._physical_power_probe_at = current + PHYSICAL_POWER_POLL_SECONDS
+
+    def _record_physical_power_probe_failure(self) -> None:
+        self._physical_power_failures = min(
+            self._physical_power_failures + 1,
+            PHYSICAL_POWER_FAILURE_THRESHOLD,
+        )
+        if self._physical_power_failures < PHYSICAL_POWER_FAILURE_THRESHOLD:
+            return
+        if self._physical_display_power_off is True:
+            return
+
+        self._physical_display_power_off = True
+        print(
+            "physical display state: off after repeated DDC/CI probe failures",
+            file=sys.stderr,
+            flush=True,
+        )
+        self._reconcile_effective_display_power_state()
+
+    def _record_physical_power_state(self, power_off: bool) -> None:
+        previous = self._physical_display_power_off
+        self._physical_power_failures = 0
+        self._physical_display_power_off = power_off
+        if power_off and previous is not True:
+            message = "physical display state: off through DDC/CI"
+        elif previous is True and not power_off:
+            message = "physical display state: on through DDC/CI"
+        else:
+            message = None
+        if message is not None:
+            print(
+                message,
+                file=sys.stderr,
+                flush=True,
+            )
+        self._reconcile_effective_display_power_state()
+
+    def _reconcile_effective_display_power_state(
+        self, *, force: bool = False
+    ) -> None:
+        if self._hyprland_display_power_off is True:
+            desired = True
+        elif self._hyprland_display_power_off is False:
+            if self._physical_power_detection_enabled():
+                desired = self._physical_display_power_off
+            else:
+                desired = False
+        else:
+            return
+
+        if desired is None:
+            return
+        if desired == self._display_power_off:
+            self._apply_quickshell_widgets(force=force)
+            if force:
+                self._apply_waywallen(force=True)
+            return
+
+        self._display_power_off = desired
+        if not desired:
             self._brightness_retry_at = 0.0
         self._persist_runtime_state()
         self._apply_waywallen(force=True)
+        self._apply_quickshell_widgets(force=True)
+
+    def _apply_quickshell_widgets(self, *, force: bool = False) -> None:
+        if self._display_power_off is None:
+            return
+
+        desired = not self._display_power_off
+        if not force and desired == self._widgets_applied:
+            return
+
+        succeeded = True
+        for config in QUICKSHELL_WIDGET_CONFIGS:
+            if not self._command_runner(
+                quickshell_widgets_command(config, desired)
+            ):
+                succeeded = False
+        if succeeded:
+            self._widgets_applied = desired
 
     def _refresh_automation_settings(self) -> None:
         try:
@@ -532,23 +762,24 @@ class DesktopAutomation:
         if self._main_pc_online is False:
             self._apply_brightness()
         if self._command_runner([HYPRCTL, "dispatch", DPMS_OFF_DISPATCH]):
-            self._display_power_off = True
+            self._hyprland_display_power_off = True
             self._display_off_pending = False
+            self._reconcile_effective_display_power_state(force=True)
             self._persist_runtime_state()
-            self._apply_waywallen(force=True)
 
     def _turn_display_on(self) -> None:
+        self._display_on_retry_at = (
+            self._monotonic() + DISPLAY_ON_RETRY_SECONDS
+        )
         if self._command_runner([HYPRCTL, "dispatch", DPMS_ON_DISPATCH]):
-            self._display_power_off = False
-            self._display_on_pending = False
             self._brightness_retry_at = 0.0
-            self._apply_brightness()
-            self._persist_runtime_state()
-            self._apply_waywallen(force=True)
 
     def _retry_display_command(self) -> None:
         if self._off_window is True:
             if self._display_off_pending and self._main_pc_online is False:
                 self._turn_display_off()
-        elif self._display_on_pending:
+        elif (
+            self._display_on_pending
+            and self._monotonic() >= self._display_on_retry_at
+        ):
             self._turn_display_on()

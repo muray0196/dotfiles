@@ -3,6 +3,7 @@
   "waywallen_control": null,
   "ddc_enabled": false,
   "ddc_bus": null,
+  "physical_power_detection_enabled": false,
   "brightness_feature": "10",
   "online_brightness": 20,
   "offline_brightness": 0,

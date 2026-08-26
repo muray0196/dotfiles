@@ -42,19 +42,14 @@ QtObject {
     readonly property color statusOkText: "#b9d99d"
     readonly property color statusErrorText: "#efa0ad"
 
-    // Module and resource identity
-    readonly property color neutralHeaderAccent: textMuted
-    readonly property color clockHeaderAccent: neutralHeaderAccent
+    // Resource identity
     readonly property color cpuAccent: "#7dcfff"
-    readonly property color environmentHeaderAccent: "#7dcfff"
-    readonly property color rainAccent: "#7dcfff"
     readonly property color gpuAccent: "#c099ff"
     readonly property color ramAccent: "#9ece6a"
     readonly property color vramAccent: "#ff9e64"
     readonly property color storageAccent: "#e0af68"
 
     // Calendar meaning
-    readonly property color calendarHeaderAccent: neutralHeaderAccent
     readonly property color calendarGridVertical: "#20c7cad5"
     readonly property color calendarGridHorizontal: "#32c7cad5"
     readonly property color calendarSundayHoliday: "#efa0ad"

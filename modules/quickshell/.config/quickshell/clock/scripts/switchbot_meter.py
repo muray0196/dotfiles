@@ -18,6 +18,9 @@ from clock_config import DEFAULT_CONFIG, load_clock_config
 SERVICE_UUID = "0000fd3d-0000-1000-8000-00805f9b34fb"
 SWITCHBOT_COMPANY_ID = 0x0969
 OUTDOOR_METER_MODEL_BYTES = {ord("w"), ord("W")}
+# A USB controller reset can leave BlueZ's scan object alive but inert.
+CONTINUOUS_SCAN_IDLE_TIMEOUT = 30.0
+SCAN_RETRY_DELAY = 2.0
 
 
 def decode_advertisement(device: Any, advertisement: Any) -> dict[str, Any] | None:
@@ -69,6 +72,11 @@ async def scan(address: str | None, once: bool, timeout: float) -> int:
 
     expected_address = address.upper() if address else None
     finished = asyncio.Event()
+    reading_received = asyncio.Event()
+
+    def stop() -> None:
+        finished.set()
+        reading_received.set()
 
     def on_advertisement(device: Any, advertisement: Any) -> None:
         reading = decode_advertisement(device, advertisement)
@@ -78,26 +86,46 @@ async def scan(address: str | None, once: bool, timeout: float) -> int:
             return
 
         print(json.dumps(reading, ensure_ascii=False), flush=True)
+        reading_received.set()
         if once:
             finished.set()
 
     loop = asyncio.get_running_loop()
     if not once:
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, finished.set)
+            loop.add_signal_handler(sig, stop)
 
-    try:
-        async with BleakScanner(on_advertisement):
-            if once:
+    if once:
+        try:
+            async with BleakScanner(on_advertisement):
                 await asyncio.wait_for(finished.wait(), timeout)
-            else:
-                await finished.wait()
-    except TimeoutError:
-        print("W3400010 advertisement not found", file=sys.stderr)
-        return 1
-    except Exception as error:
-        print(f"Bluetooth scan failed: {error}", file=sys.stderr)
-        return 1
+        except TimeoutError:
+            print("W3400010 advertisement not found", file=sys.stderr)
+            return 1
+        except Exception as error:
+            print(f"Bluetooth scan failed: {error}", file=sys.stderr)
+            return 1
+        return 0
+
+    while not finished.is_set():
+        reading_received.clear()
+        try:
+            async with BleakScanner(on_advertisement):
+                while not finished.is_set():
+                    try:
+                        await asyncio.wait_for(
+                            reading_received.wait(),
+                            CONTINUOUS_SCAN_IDLE_TIMEOUT,
+                        )
+                    except TimeoutError:
+                        break
+                    reading_received.clear()
+        except Exception as error:
+            if not finished.is_set():
+                print(f"Bluetooth scan failed: {error}; retrying", file=sys.stderr)
+
+        if not finished.is_set():
+            await asyncio.sleep(SCAN_RETRY_DELAY)
 
     return 0
 

@@ -26,6 +26,7 @@ class MachineConfig:
     waywallen_control: Path | None
     ddc_enabled: bool
     ddc_bus: int | None
+    physical_power_detection_enabled: bool
     brightness_feature: str
     online_brightness: int
     offline_brightness: int
@@ -37,6 +38,7 @@ DISABLED_MACHINE_CONFIG = MachineConfig(
     waywallen_control=None,
     ddc_enabled=False,
     ddc_bus=None,
+    physical_power_detection_enabled=False,
     brightness_feature="10",
     online_brightness=20,
     offline_brightness=0,
@@ -161,6 +163,20 @@ def load_machine_config(path: Path = DEFAULT_CONFIG) -> MachineConfig:
             "machine config field 'ddc_bus' must be a non-negative integer or null"
         )
 
+    physical_power_detection_enabled = data.get(
+        "physical_power_detection_enabled", False
+    )
+    if not isinstance(physical_power_detection_enabled, bool):
+        raise ValueError(
+            "machine config field 'physical_power_detection_enabled' "
+            "must be a boolean"
+        )
+    if physical_power_detection_enabled and not ddc_enabled:
+        raise ValueError(
+            "machine config field 'physical_power_detection_enabled' "
+            "requires 'ddc_enabled'"
+        )
+
     brightness_feature = data.get("brightness_feature", "10")
     if not isinstance(brightness_feature, str) or not brightness_feature:
         raise ValueError(
@@ -182,6 +198,7 @@ def load_machine_config(path: Path = DEFAULT_CONFIG) -> MachineConfig:
         waywallen_control=waywallen_control,
         ddc_enabled=ddc_enabled,
         ddc_bus=ddc_bus if isinstance(ddc_bus, int) else None,
+        physical_power_detection_enabled=physical_power_detection_enabled,
         brightness_feature=brightness_feature,
         online_brightness=_brightness(data, "online_brightness"),
         offline_brightness=_brightness(data, "offline_brightness"),

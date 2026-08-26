@@ -24,11 +24,19 @@ Scope {
     readonly property int moduleDividerHeight: 7
     readonly property int panelInset: 10
     readonly property int pollIntervalSeconds: 2
+    readonly property int metricsCommitFallbackMs: 500
+    readonly property int historySampleIntervalMs: 5000
+    readonly property int historySampleCapacity: 120
+    readonly property int performancePanelGap: 10
     readonly property int freshnessCautionMs: 6000
     readonly property int freshnessErrorMs: 30000
     readonly property string smallLabelFont: "Adwaita Mono"
     readonly property string numericFont: "Adwaita Sans"
     property double nowMs: Date.now()
+    property string pendingLocalMetricsLine: ""
+    property string pendingRemoteMetricsLine: ""
+    property bool localMetricsPending: false
+    property bool remoteMetricsPending: false
 
     function updateMetrics(target, line) {
         try {
@@ -107,6 +115,8 @@ Scope {
                         model: gpu.model,
                         usage_percent: gpu.usage_percent,
                         temperature_c: gpu.temperature_c,
+                        hotspot_temperature_c:
+                            gpu.hotspot_temperature_c,
                         power_w: gpu.power_w,
                         vram: vram
                     }]
@@ -139,6 +149,9 @@ Scope {
                     temperature:
                         typeof sourceGpu.temperature_c === "number"
                         ? sourceGpu.temperature_c : null,
+                    hotspotTemperature:
+                        typeof sourceGpu.hotspot_temperature_c === "number"
+                        ? sourceGpu.hotspot_temperature_c : null,
                     power: typeof sourceGpu.power_w === "number"
                         ? sourceGpu.power_w : null,
                     vram: {
@@ -241,6 +254,44 @@ Scope {
         }
     }
 
+    function queueMetrics(source, line) {
+        if (source === "local") {
+            pendingLocalMetricsLine = line;
+            localMetricsPending = true;
+        } else if (source === "remote") {
+            pendingRemoteMetricsLine = line;
+            remoteMetricsPending = true;
+        } else {
+            return;
+        }
+
+        if (localMetricsPending && remoteMetricsPending) {
+            metricsCommitTimer.stop();
+            commitPendingMetrics();
+        } else if (!metricsCommitTimer.running) {
+            metricsCommitTimer.start();
+        }
+    }
+
+    function commitPendingMetrics() {
+        const localLine = pendingLocalMetricsLine;
+        const remoteLine = pendingRemoteMetricsLine;
+        const applyLocal = localMetricsPending;
+        const applyRemote = remoteMetricsPending;
+
+        pendingLocalMetricsLine = "";
+        pendingRemoteMetricsLine = "";
+        localMetricsPending = false;
+        remoteMetricsPending = false;
+
+        if (applyLocal)
+            updateMetrics(localData, localLine);
+        if (applyRemote)
+            updateMetrics(remoteData, remoteLine);
+
+        historyStore.capture(localData, remoteData, Date.now());
+    }
+
     function compactModelName(value) {
         if (typeof value !== "string")
             return "";
@@ -332,15 +383,46 @@ Scope {
             ? Math.max(0, nowMs - metrics.lastUpdateMs) : -1;
     }
 
-    function moduleTone(metrics) {
+    function moduleHealth(metrics) {
         if (!metrics.available)
-            return theme.statusUnknown;
+            return 0;
         const age = sampleAgeMs(metrics);
         if (age > freshnessErrorMs || metrics.unavailable)
-            return theme.statusError;
+            return 3;
         if (age > freshnessCautionMs || metrics.partial)
+            return 2;
+        return 1;
+    }
+
+    function healthTone(health) {
+        switch (health) {
+        case 1:
+            return theme.statusOk;
+        case 2:
             return theme.statusCaution;
-        return theme.statusOk;
+        case 3:
+            return theme.statusError;
+        default:
+            return theme.statusUnknown;
+        }
+    }
+
+    function moduleTone(metrics) {
+        return healthTone(moduleHealth(metrics));
+    }
+
+    function combinedModuleTone(firstMetrics, secondMetrics) {
+        const first = moduleHealth(firstMetrics);
+        const second = moduleHealth(secondMetrics);
+        if (first === 0 && second === 0)
+            return theme.statusUnknown;
+        if (first === 1 && second === 1)
+            return theme.statusOk;
+        const firstUsable = first === 1 || first === 2;
+        const secondUsable = second === 1 || second === 2;
+        if (!firstUsable && !secondUsable)
+            return theme.statusError;
+        return theme.statusCaution;
     }
 
     component MetricsData: QtObject {
@@ -384,6 +466,204 @@ Scope {
         property real uptimeSeconds: 0
     }
 
+    component HistoryStore: QtObject {
+        id: historyStoreObject
+
+        property var localCpuTemperature: []
+        property var localGpu1Temperature: []
+        property var localGpu1Hotspot: []
+        property var localGpu2Temperature: []
+        property var localGpu2Hotspot: []
+        property var localComputePower: []
+        property var mainCpuTemperature: []
+        property var mainGpuTemperature: []
+        property var mainComputePower: []
+        property double lastSampleBucket: -1
+
+        function sourceFresh(metrics, sampledAt) {
+            if (!metrics || !metrics.available
+                    || metrics.lastUpdateMs <= 0)
+                return false;
+            return Math.max(0, sampledAt - metrics.lastUpdateMs)
+                <= shell.freshnessCautionMs;
+        }
+
+        function sensorValue(value, fresh) {
+            return fresh && typeof value === "number" && isFinite(value)
+                ? value : null;
+        }
+
+        function gpuSensorValue(metrics, index, field, fresh) {
+            if (!fresh || !metrics || !Array.isArray(metrics.gpus)
+                    || index < 0 || index >= metrics.gpus.length)
+                return null;
+            const gpu = metrics.gpus[index];
+            const value = gpu ? gpu[field] : null;
+            return typeof value === "number" && isFinite(value)
+                ? value : null;
+        }
+
+        function localComputePowerValue(metrics, fresh) {
+            if (!metrics)
+                return null;
+            const cpu = sensorValue(metrics.cpuPower, fresh);
+            const gpu1 = gpuSensorValue(metrics, 0, "power", fresh);
+            const gpu2 = gpuSensorValue(metrics, 1, "power", fresh);
+            if (cpu === null || gpu1 === null || gpu2 === null
+                    || cpu < 0 || gpu1 < 0 || gpu2 < 0)
+                return null;
+            return cpu + gpu1 + gpu2;
+        }
+
+        function mainComputePowerValue(metrics, fresh) {
+            if (!metrics)
+                return null;
+            const cpu = sensorValue(metrics.cpuPower, fresh);
+            const gpu = sensorValue(metrics.gpuPower, fresh);
+            if (cpu === null || gpu === null || cpu < 0 || gpu < 0)
+                return null;
+            return cpu + gpu;
+        }
+
+        function appendTimedSample(samples, value, missingSamples) {
+            const capacity = Math.max(1, shell.historySampleCapacity);
+            const incoming = Math.min(capacity,
+                Math.max(0, missingSamples) + 1);
+            const keep = Math.max(0, capacity - incoming);
+            const start = Math.max(0, samples.length - keep);
+            const next = samples.slice(start);
+
+            for (let index = 1; index < incoming; index++)
+                next.push(null);
+            next.push(value);
+            return next;
+        }
+
+        function recordSample(samples, value, bucketAdvance) {
+            if (bucketAdvance > 0)
+                return appendTimedSample(samples, value,
+                    bucketAdvance - 1);
+
+            const next = samples.slice();
+            if (next.length === 0)
+                next.push(value);
+            else
+                next[next.length - 1] = value;
+            return next;
+        }
+
+        function capture(localMetrics, mainMetrics, sampledAt) {
+            const localFresh = sourceFresh(localMetrics, sampledAt);
+            const mainFresh = sourceFresh(mainMetrics, sampledAt);
+            const bucket = Math.floor(
+                sampledAt / shell.historySampleIntervalMs);
+            let bucketAdvance = lastSampleBucket < 0
+                ? 1 : bucket - lastSampleBucket;
+
+            // A backward wall-clock adjustment starts a new honest timeline.
+            if (bucketAdvance < 0) {
+                localCpuTemperature = [];
+                localGpu1Temperature = [];
+                localGpu1Hotspot = [];
+                localGpu2Temperature = [];
+                localGpu2Hotspot = [];
+                localComputePower = [];
+                mainCpuTemperature = [];
+                mainGpuTemperature = [];
+                mainComputePower = [];
+                bucketAdvance = 1;
+            }
+
+            localCpuTemperature = recordSample(
+                localCpuTemperature,
+                sensorValue(localMetrics.cpuTemperature, localFresh),
+                bucketAdvance
+            );
+            localGpu1Temperature = recordSample(
+                localGpu1Temperature,
+                gpuSensorValue(localMetrics, 0, "temperature", localFresh),
+                bucketAdvance
+            );
+            localGpu1Hotspot = recordSample(
+                localGpu1Hotspot,
+                gpuSensorValue(
+                    localMetrics, 0, "hotspotTemperature", localFresh),
+                bucketAdvance
+            );
+            localGpu2Temperature = recordSample(
+                localGpu2Temperature,
+                gpuSensorValue(localMetrics, 1, "temperature", localFresh),
+                bucketAdvance
+            );
+            localGpu2Hotspot = recordSample(
+                localGpu2Hotspot,
+                gpuSensorValue(
+                    localMetrics, 1, "hotspotTemperature", localFresh),
+                bucketAdvance
+            );
+            localComputePower = recordSample(
+                localComputePower,
+                localComputePowerValue(localMetrics, localFresh),
+                bucketAdvance
+            );
+            mainCpuTemperature = recordSample(
+                mainCpuTemperature,
+                sensorValue(mainMetrics.cpuTemperature, mainFresh),
+                bucketAdvance
+            );
+            mainGpuTemperature = recordSample(
+                mainGpuTemperature,
+                sensorValue(mainMetrics.gpuTemperature, mainFresh),
+                bucketAdvance
+            );
+            mainComputePower = recordSample(
+                mainComputePower,
+                mainComputePowerValue(mainMetrics, mainFresh),
+                bucketAdvance
+            );
+            lastSampleBucket = bucket;
+        }
+
+        function peak(samples) {
+            let result = null;
+            for (let index = 0; index < samples.length; index++) {
+                const value = samples[index];
+                if (typeof value === "number" && isFinite(value)
+                        && (result === null || value > result))
+                    result = value;
+            }
+            return result;
+        }
+
+        function average(samples) {
+            let total = 0;
+            let count = 0;
+            for (let index = 0; index < samples.length; index++) {
+                const value = samples[index];
+                if (typeof value === "number" && isFinite(value)) {
+                    total += value;
+                    count++;
+                }
+            }
+            return count === 0 ? null : total / count;
+        }
+
+        function temperaturePeakText(samples) {
+            const value = peak(samples);
+            return value === null ? "--" : Math.round(value).toString();
+        }
+
+        function powerAverageText(samples) {
+            const value = average(samples);
+            return value === null ? "--" : Math.round(value).toString();
+        }
+
+        function powerPeakText(samples) {
+            const value = peak(samples);
+            return value === null ? "--" : Math.round(value).toString();
+        }
+    }
+
     MetricsData {
         id: localData
         expectsSystemDetails: true
@@ -391,6 +671,10 @@ Scope {
 
     MetricsData {
         id: remoteData
+    }
+
+    HistoryStore {
+        id: historyStore
     }
 
     IpcHandler {
@@ -451,15 +735,6 @@ Scope {
             width: 1
             color: theme.panelEdgeDark
         }
-    }
-
-    component ModuleHeaderRail: Rectangle {
-        required property color tone
-
-        width: 3
-        height: 18
-        radius: 0
-        color: tone
     }
 
     component ModuleDivider: Item {
@@ -564,7 +839,7 @@ Scope {
 
         implicitHeight: 24
 
-        ModuleHeaderRail {
+        UI.ModuleHeaderRail {
             anchors {
                 left: parent.left
                 verticalCenter: parent.verticalCenter
@@ -613,6 +888,460 @@ Scope {
                 font.weight: Font.Normal
                 elide: Text.ElideLeft
             }
+        }
+    }
+
+    component SummaryTemperatureMetric: Item {
+        id: summaryTemperatureMetric
+
+        required property string label
+        required property var samples
+
+        implicitHeight: 27
+
+        Column {
+            anchors.centerIn: parent
+            width: parent.width
+            spacing: -2
+
+            Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: summaryTemperatureMetric.label
+                color: theme.textMuted
+                font.family: shell.smallLabelFont
+                font.pixelSize: 8
+                font.weight: Font.Medium
+            }
+
+            Item {
+                width: parent.width
+                height: 20
+
+                Row {
+                    anchors.centerIn: parent
+                    spacing: 1
+
+                    Text {
+                        id: summaryTemperatureValue
+
+                        text: historyStore.temperaturePeakText(
+                            summaryTemperatureMetric.samples)
+                        color: theme.textPrimary
+                        font.family: shell.numericFont
+                        font.pixelSize: 18
+                        font.weight: Font.Normal
+                    }
+
+                    Text {
+                        anchors.baseline: summaryTemperatureValue.baseline
+                        text: "°C"
+                        color: theme.textMuted
+                        font.family: shell.smallLabelFont
+                        font.pixelSize: 11
+                        font.weight: Font.Medium
+                    }
+                }
+            }
+        }
+    }
+
+    component SummaryDeviceMetric: Item {
+        id: summaryDeviceMetric
+
+        required property string label
+        required property var temperatureSamples
+        required property color accent
+        property bool hotspotVisible: false
+        property var hotspotSamples: []
+
+        implicitHeight: 38
+
+        Column {
+            anchors.centerIn: parent
+            width: parent.width
+            spacing: 0
+
+            Text {
+                width: parent.width
+                height: 11
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                text: summaryDeviceMetric.label
+                color: summaryDeviceMetric.accent
+                font.family: shell.smallLabelFont
+                font.pixelSize: 9
+                font.weight: Font.Medium
+            }
+
+            Row {
+                width: parent.width
+                height: 27
+
+                SummaryTemperatureMetric {
+                    width: summaryDeviceMetric.hotspotVisible
+                        ? parent.width / 2 : parent.width
+                    height: parent.height
+                    label: summaryDeviceMetric.hotspotVisible
+                        ? "EDGE" : "TEMP"
+                    samples: summaryDeviceMetric.temperatureSamples
+                }
+
+                SummaryTemperatureMetric {
+                    width: parent.width / 2
+                    height: parent.height
+                    visible: summaryDeviceMetric.hotspotVisible
+                    label: "HOTSPOT"
+                    samples: summaryDeviceMetric.hotspotSamples
+                }
+            }
+        }
+    }
+
+    component SummaryPowerValue: Item {
+        id: summaryPowerValue
+
+        required property string label
+        required property var samples
+        property bool peakValue: false
+
+        implicitHeight: 29
+
+        Column {
+            anchors.centerIn: parent
+            width: parent.width
+            spacing: -2
+
+            Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: summaryPowerValue.label
+                color: theme.textMuted
+                font.family: shell.smallLabelFont
+                font.pixelSize: 8
+                font.weight: Font.Medium
+            }
+
+            Item {
+                width: parent.width
+                height: 20
+
+                Row {
+                    anchors.centerIn: parent
+                    spacing: 1
+
+                    Text {
+                        id: aggregatePowerValue
+
+                        text: summaryPowerValue.peakValue
+                            ? historyStore.powerPeakText(
+                                summaryPowerValue.samples)
+                            : historyStore.powerAverageText(
+                                summaryPowerValue.samples)
+                        color: theme.textPrimary
+                        font.family: shell.numericFont
+                        font.pixelSize: 17
+                        font.weight: Font.Normal
+                    }
+
+                    Text {
+                        anchors.baseline: aggregatePowerValue.baseline
+                        text: "W"
+                        color: theme.textMuted
+                        font.family: shell.smallLabelFont
+                        font.pixelSize: 11
+                        font.weight: Font.Medium
+                    }
+                }
+            }
+        }
+    }
+
+    component SummaryAggregatePower: Item {
+        id: summaryAggregatePower
+
+        required property string sourceLabel
+        required property var samples
+
+        implicitHeight: 34
+
+        Rectangle {
+            anchors {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+                leftMargin: 8
+                rightMargin: 8
+            }
+            height: 1
+            color: theme.divider
+        }
+
+        Row {
+            anchors {
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+            }
+            height: 30
+
+            Item {
+                width: parent.width * 0.4
+                height: parent.height
+
+                Column {
+                    anchors.centerIn: parent
+                    width: parent.width
+                    spacing: -1
+
+                    Text {
+                        width: parent.width
+                        horizontalAlignment: Text.AlignHCenter
+                        text: "COMPUTE POWER"
+                        color: theme.textSecondary
+                        font.family: shell.smallLabelFont
+                        font.pixelSize: 9
+                        font.weight: Font.Medium
+                    }
+
+                    Text {
+                        width: parent.width
+                        horizontalAlignment: Text.AlignHCenter
+                        text: summaryAggregatePower.sourceLabel
+                        color: theme.textMuted
+                        font.family: shell.smallLabelFont
+                        font.pixelSize: 8
+                        font.weight: Font.Normal
+                    }
+                }
+            }
+
+            SummaryPowerValue {
+                width: parent.width * 0.3
+                height: parent.height
+                label: "AVG"
+                samples: summaryAggregatePower.samples
+            }
+
+            SummaryPowerValue {
+                width: parent.width * 0.3
+                height: parent.height
+                label: "MAX"
+                samples: summaryAggregatePower.samples
+                peakValue: true
+            }
+        }
+    }
+
+    component PerformanceSummaryPanel: Rectangle {
+        id: performanceSummaryPanel
+
+        property MetricsData localMetrics
+        property MetricsData mainMetrics
+        property real bodyExtraHeight: 0
+        readonly property bool localFresh: historyStore.sourceFresh(
+            localMetrics, shell.nowMs)
+        readonly property bool mainFresh: historyStore.sourceFresh(
+            mainMetrics, shell.nowMs)
+        readonly property color summaryTone: shell.combinedModuleTone(
+            localMetrics, mainMetrics)
+        readonly property int headerHeight: 24
+        readonly property int sectionHeaderHeight: 19
+        readonly property int minimumTemperatureRowHeight: 38
+        readonly property int aggregatePowerHeight: 34
+        readonly property int minimumMachineBodyHeight:
+            minimumTemperatureRowHeight + aggregatePowerHeight
+        readonly property real rowExtraHeight:
+            Math.max(0, bodyExtraHeight) / 2
+
+        implicitWidth: shell.panelWidth
+        implicitHeight: headerHeight
+            + sectionHeaderHeight * 2
+            + minimumMachineBodyHeight * 2
+            + shell.moduleDividerHeight * 2
+            + shell.panelInset * 2
+        radius: 0
+        color: theme.panelBackground
+        border.width: 0
+
+        Column {
+            anchors {
+                top: parent.top
+                bottom: parent.bottom
+                horizontalCenter: parent.horizontalCenter
+                topMargin: shell.panelInset
+                bottomMargin: shell.panelInset
+            }
+            width: shell.panelContentWidth
+            spacing: 0
+
+            Item {
+                width: parent.width
+                height: performanceSummaryPanel.headerHeight
+
+                UI.ModuleHeaderRail {
+                    anchors {
+                        left: parent.left
+                        verticalCenter: parent.verticalCenter
+                    }
+                    tone: performanceSummaryPanel.summaryTone
+                }
+
+                Text {
+                    anchors {
+                        left: parent.left
+                        leftMargin: 10
+                        verticalCenter: parent.verticalCenter
+                    }
+                    text: "PERFORMANCE SUMMARY"
+                    color: theme.textPrimary
+                    font.family: shell.smallLabelFont
+                    font.pixelSize: 17
+                    font.weight: Font.Medium
+                }
+
+                Text {
+                    anchors {
+                        right: parent.right
+                        verticalCenter: parent.verticalCenter
+                    }
+                    text: "10 MIN"
+                    color: theme.textMuted
+                    font.family: shell.smallLabelFont
+                    font.pixelSize: 9
+                    font.weight: Font.Medium
+                }
+            }
+
+            ModuleDivider {
+                width: parent.width
+            }
+
+            UI.SectionHeader {
+                width: parent.width
+                height: performanceSummaryPanel.sectionHeaderHeight
+                label: "LOCAL"
+                metadata: "TEMP MAX"
+                labelTone: performanceSummaryPanel.localFresh
+                    ? theme.textPrimary : theme.textDisabled
+            }
+
+            Item {
+                width: parent.width
+                height: performanceSummaryPanel.minimumMachineBodyHeight
+                    + performanceSummaryPanel.rowExtraHeight
+
+                Column {
+                    anchors.fill: parent
+                    spacing: 0
+
+                    Row {
+                        width: parent.width
+                        height: parent.height
+                            - performanceSummaryPanel.aggregatePowerHeight
+
+                        SummaryDeviceMetric {
+                            width: parent.width / 3
+                            height: parent.height
+                            label: "CPU"
+                            temperatureSamples:
+                                historyStore.localCpuTemperature
+                            accent: theme.cpuAccent
+                        }
+
+                        SummaryDeviceMetric {
+                            width: parent.width / 3
+                            height: parent.height
+                            label: "GPU 1"
+                            temperatureSamples:
+                                historyStore.localGpu1Temperature
+                            hotspotVisible: true
+                            hotspotSamples:
+                                historyStore.localGpu1Hotspot
+                            accent: theme.gpuAccent
+                        }
+
+                        SummaryDeviceMetric {
+                            width: parent.width / 3
+                            height: parent.height
+                            label: "GPU 2"
+                            temperatureSamples:
+                                historyStore.localGpu2Temperature
+                            hotspotVisible: true
+                            hotspotSamples:
+                                historyStore.localGpu2Hotspot
+                            accent: theme.gpuAccent
+                        }
+                    }
+
+                    SummaryAggregatePower {
+                        width: parent.width
+                        height: performanceSummaryPanel.aggregatePowerHeight
+                        sourceLabel: "CPU + GPU1 + GPU2"
+                        samples: historyStore.localComputePower
+                    }
+                }
+            }
+
+            ModuleDivider {
+                width: parent.width
+            }
+
+            UI.SectionHeader {
+                width: parent.width
+                height: performanceSummaryPanel.sectionHeaderHeight
+                label: "MAIN"
+                metadata: "TEMP MAX"
+                labelTone: performanceSummaryPanel.mainFresh
+                    ? theme.textPrimary : theme.textDisabled
+            }
+
+            Item {
+                width: parent.width
+                height: performanceSummaryPanel.minimumMachineBodyHeight
+                    + performanceSummaryPanel.rowExtraHeight
+
+                Column {
+                    anchors.fill: parent
+                    spacing: 0
+
+                    Row {
+                        width: parent.width
+                        height: parent.height
+                            - performanceSummaryPanel.aggregatePowerHeight
+
+                        SummaryDeviceMetric {
+                            width: parent.width / 2
+                            height: parent.height
+                            label: "CPU"
+                            temperatureSamples:
+                                historyStore.mainCpuTemperature
+                            accent: theme.cpuAccent
+                        }
+
+                        SummaryDeviceMetric {
+                            width: parent.width / 2
+                            height: parent.height
+                            label: "GPU"
+                            temperatureSamples:
+                                historyStore.mainGpuTemperature
+                            accent: theme.gpuAccent
+                        }
+                    }
+
+                    SummaryAggregatePower {
+                        width: parent.width
+                        height: performanceSummaryPanel.aggregatePowerHeight
+                        sourceLabel: "CPU + GPU"
+                        samples: historyStore.mainComputePower
+                    }
+                }
+            }
+        }
+
+        PanelEdge {
+            anchors.fill: parent
+            z: 10
         }
     }
 
@@ -1211,6 +1940,7 @@ Scope {
         id: memoryComparisonSection
 
         property MetricsData metrics
+        property bool forceZero: false
 
         spacing: 2
 
@@ -1227,20 +1957,28 @@ Scope {
             MemoryPair {
                 width: (parent.width - 12) / 2
                 label: "RAM"
-                available: memoryComparisonSection.metrics.memoryAvailable
-                used: memoryComparisonSection.metrics.memoryUsed
-                total: memoryComparisonSection.metrics.memoryTotal
-                usage: memoryComparisonSection.metrics.memoryUsage
+                available: memoryComparisonSection.forceZero
+                    || memoryComparisonSection.metrics.memoryAvailable
+                used: memoryComparisonSection.forceZero ? 0
+                    : memoryComparisonSection.metrics.memoryUsed
+                total: memoryComparisonSection.forceZero ? 0
+                    : memoryComparisonSection.metrics.memoryTotal
+                usage: memoryComparisonSection.forceZero ? 0
+                    : memoryComparisonSection.metrics.memoryUsage
                 accent: theme.ramAccent
             }
 
             MemoryPair {
                 width: (parent.width - 12) / 2
                 label: "VRAM"
-                available: memoryComparisonSection.metrics.vramAvailable
-                used: memoryComparisonSection.metrics.vramUsed
-                total: memoryComparisonSection.metrics.vramTotal
-                usage: memoryComparisonSection.metrics.vramUsage
+                available: memoryComparisonSection.forceZero
+                    || memoryComparisonSection.metrics.vramAvailable
+                used: memoryComparisonSection.forceZero ? 0
+                    : memoryComparisonSection.metrics.vramUsed
+                total: memoryComparisonSection.forceZero ? 0
+                    : memoryComparisonSection.metrics.vramTotal
+                usage: memoryComparisonSection.forceZero ? 0
+                    : memoryComparisonSection.metrics.vramUsage
                 accent: theme.vramAccent
             }
         }
@@ -1322,6 +2060,9 @@ Scope {
         id: remoteSystemPanel
 
         property MetricsData metrics
+        // Current stale values read as zero; history keeps the outage as a gap.
+        readonly property bool showingZeroValues: metrics.available
+            && !historyStore.sourceFresh(metrics, shell.nowMs)
 
         implicitWidth: shell.panelWidth
         implicitHeight: remoteSystemContent.implicitHeight
@@ -1356,12 +2097,15 @@ Scope {
             ComputeSection {
                 width: parent.width
                 label: "CPU"
-                available: remoteSystemPanel.metrics.cpuAvailable
+                available: remoteSystemPanel.showingZeroValues
+                    || remoteSystemPanel.metrics.cpuAvailable
                 modelName: remoteSystemPanel.metrics.cpuModel
-                usage: remoteSystemPanel.metrics.cpuUsage
-                temperatureValue:
-                    remoteSystemPanel.metrics.cpuTemperature
-                powerValue: remoteSystemPanel.metrics.cpuPower
+                usage: remoteSystemPanel.showingZeroValues ? 0
+                    : remoteSystemPanel.metrics.cpuUsage
+                temperatureValue: remoteSystemPanel.showingZeroValues ? 0
+                    : remoteSystemPanel.metrics.cpuTemperature
+                powerValue: remoteSystemPanel.showingZeroValues ? 0
+                    : remoteSystemPanel.metrics.cpuPower
                 accent: theme.cpuAccent
             }
 
@@ -1372,12 +2116,15 @@ Scope {
             ComputeSection {
                 width: parent.width
                 label: "GPU"
-                available: remoteSystemPanel.metrics.gpuAvailable
+                available: remoteSystemPanel.showingZeroValues
+                    || remoteSystemPanel.metrics.gpuAvailable
                 modelName: remoteSystemPanel.metrics.gpuModel
-                usage: remoteSystemPanel.metrics.gpuUsage
-                temperatureValue:
-                    remoteSystemPanel.metrics.gpuTemperature
-                powerValue: remoteSystemPanel.metrics.gpuPower
+                usage: remoteSystemPanel.showingZeroValues ? 0
+                    : remoteSystemPanel.metrics.gpuUsage
+                temperatureValue: remoteSystemPanel.showingZeroValues ? 0
+                    : remoteSystemPanel.metrics.gpuTemperature
+                powerValue: remoteSystemPanel.showingZeroValues ? 0
+                    : remoteSystemPanel.metrics.gpuPower
                 accent: theme.gpuAccent
             }
 
@@ -1388,6 +2135,7 @@ Scope {
             MemoryComparisonSection {
                 width: parent.width
                 metrics: remoteSystemPanel.metrics
+                forceZero: remoteSystemPanel.showingZeroValues
             }
         }
 
@@ -1417,31 +2165,51 @@ Scope {
         exclusiveZone: 0
         focusable: false
 
-        Column {
+        Item {
             id: cards
 
-            readonly property real cardSpacing: Math.max(0,
-                height
-                - localSystem.implicitHeight
-                - mainSystem.implicitHeight
-            )
-
             anchors.fill: parent
-            spacing: 0
 
             LocalSystemPanel {
                 id: localSystem
-                metrics: localData
-            }
 
-            Item {
-                width: parent.width
-                height: cards.cardSpacing
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                }
+                metrics: localData
             }
 
             RemoteSystemPanel {
                 id: mainSystem
+
+                anchors {
+                    top: localSystem.bottom
+                    topMargin: shell.performancePanelGap
+                    left: parent.left
+                    right: parent.right
+                }
                 metrics: remoteData
+            }
+
+            PerformanceSummaryPanel {
+                anchors {
+                    top: mainSystem.bottom
+                    topMargin: shell.performancePanelGap
+                    bottom: parent.bottom
+                    left: parent.left
+                    right: parent.right
+                }
+                localMetrics: localData
+                mainMetrics: remoteData
+                bodyExtraHeight: Math.max(0,
+                    cards.height
+                    - localSystem.implicitHeight
+                    - mainSystem.implicitHeight
+                    - shell.performancePanelGap * 2
+                    - implicitHeight
+                )
             }
         }
     }
@@ -1460,7 +2228,7 @@ Scope {
 
         stdout: SplitParser {
             splitMarker: "\n"
-            onRead: line => shell.updateMetrics(localData, line)
+            onRead: line => shell.queueMetrics("local", line)
         }
     }
 
@@ -1484,8 +2252,15 @@ Scope {
 
         stdout: SplitParser {
             splitMarker: "\n"
-            onRead: line => shell.updateMetrics(remoteData, line)
+            onRead: line => shell.queueMetrics("remote", line)
         }
+    }
+
+    Timer {
+        id: metricsCommitTimer
+        interval: shell.metricsCommitFallbackMs
+        repeat: false
+        onTriggered: shell.commitPendingMetrics()
     }
 
     Timer {

@@ -45,9 +45,22 @@ Scope {
     readonly property int currentDayOfYear: dayOfYear(calendarDate)
     readonly property int currentYearLength: daysInYear(currentYear)
     readonly property var nextHolidaySummary: nextHolidayDetails()
+    readonly property bool localTimeSourceCurrent: validDate(clock.date)
+    readonly property color localTimeSourceTone: !localTimeSourceCurrent
+        ? theme.statusError : currentTimeZoneAbbreviation !== ""
+        ? theme.statusOk : theme.statusCaution
+    readonly property bool calendarSourceCurrent: validDate(calendarDate)
+    readonly property color calendarSourceTone: !calendarSourceCurrent
+        ? theme.statusError : holidayDataAvailable
+        ? theme.statusOk : theme.statusCaution
 
     function padded(value) {
         return value < 10 ? "0" + value : value.toString();
+    }
+
+    function validDate(value) {
+        return value !== null && typeof value.getTime === "function"
+            && isFinite(value.getTime());
     }
 
     function utcOffsetLabel(date) {
@@ -177,30 +190,27 @@ Scope {
 
         for (let index = 0; index < cellCount; index++) {
             const day = index - firstWeekday + 1;
-            if (day < 1 || day > daysInMonth) {
-                cells.push({
-                    day: 0,
-                    key: "",
-                    weekday: index % 7,
-                    holiday: "",
-                    isToday: false
-                });
-                continue;
-            }
-
-            const key = dateKey(currentYear, currentMonth, day);
+            const date = new Date(currentYear, currentMonth - 1, day);
+            const cellYear = date.getFullYear();
+            const cellMonth = date.getMonth() + 1;
+            const cellDay = date.getDate();
+            const key = dateKey(cellYear, cellMonth, cellDay);
             cells.push({
-                day: day,
+                day: cellDay,
                 key: key,
                 weekday: index % 7,
                 holiday: holidayName(key),
-                isToday: key === currentDateKey
+                isToday: key === currentDateKey,
+                isCurrentMonth: cellYear === currentYear
+                    && cellMonth === currentMonth
             });
         }
         return cells;
     }
 
     function calendarDayColor(cell) {
+        if (!cell.isCurrentMonth)
+            return theme.textDisabled;
         if (cell.holiday !== "" || cell.weekday === 0)
             return theme.calendarSundayHoliday;
         if (cell.weekday === 6)
@@ -247,15 +257,6 @@ Scope {
             countdown: "",
             known: true
         };
-    }
-
-    component ModuleHeaderRail: Rectangle {
-        required property color tone
-
-        width: 3
-        height: 18
-        radius: 0
-        color: tone
     }
 
     component EnvironmentMetric: Column {
@@ -470,7 +471,11 @@ Scope {
     property int sensorRssi: 0
     property bool sensorAvailable: false
     property bool sensorFresh: false
+    readonly property int sensorDisplayUpdateIntervalMs: 30000
+    property var sensorPendingReading: null
+    property double sensorLastSeenMs: 0
     property double sensorLastUpdateMs: 0
+    property double sensorLastDisplayCommitMs: 0
     readonly property string sensorObservedAt: sensorAvailable
             && sensorLastUpdateMs > 0
         ? Qt.formatDateTime(new Date(sensorLastUpdateMs), "HH:mm") : ""
@@ -670,6 +675,17 @@ Scope {
         return (difference > 0 ? "+" : "−") + magnitude;
     }
 
+    function applySensorReading(reading) {
+        temperature = reading.temperature;
+        humidity = reading.humidity;
+        sensorBattery = reading.battery;
+        sensorRssi = reading.rssi;
+        sensorLastUpdateMs = reading.timestamp * 1000;
+        sensorLastDisplayCommitMs = Date.now();
+        sensorPendingReading = null;
+        sensorAvailable = true;
+    }
+
     function updateSensor(line) {
         try {
             const reading = JSON.parse(line);
@@ -678,16 +694,38 @@ Scope {
                     || typeof reading.timestamp !== "number")
                 return;
 
-            temperature = reading.temperature;
-            humidity = reading.humidity;
-            sensorBattery = typeof reading.battery === "number"
-                    && reading.battery >= 0 && reading.battery <= 100
-                ? Math.round(reading.battery) : -1;
-            sensorRssi = typeof reading.rssi === "number"
-                ? Math.round(reading.rssi) : 0;
-            sensorLastUpdateMs = reading.timestamp * 1000;
-            sensorAvailable = true;
+            const normalizedReading = {
+                temperature: reading.temperature,
+                humidity: reading.humidity,
+                battery: typeof reading.battery === "number"
+                        && reading.battery >= 0 && reading.battery <= 100
+                    ? Math.round(reading.battery) : -1,
+                rssi: typeof reading.rssi === "number"
+                    ? Math.round(reading.rssi) : 0,
+                timestamp: reading.timestamp
+            };
+            const receivedAt = Date.now();
+
+            sensorLastSeenMs = reading.timestamp * 1000;
             sensorFresh = true;
+
+            const displayUpdateDue = !sensorAvailable
+                || sensorLastDisplayCommitMs <= 0
+                || receivedAt - sensorLastDisplayCommitMs
+                    >= sensorDisplayUpdateIntervalMs;
+            if (displayUpdateDue) {
+                sensorDisplayTimer.stop();
+                applySensorReading(normalizedReading);
+                return;
+            }
+
+            sensorPendingReading = normalizedReading;
+            if (!sensorDisplayTimer.running) {
+                sensorDisplayTimer.interval = Math.max(1,
+                    sensorDisplayUpdateIntervalMs
+                        - (receivedAt - sensorLastDisplayCommitMs));
+                sensorDisplayTimer.start();
+            }
         } catch (error) {
             console.warn("Invalid SwitchBot reading:", error);
         }
@@ -1073,12 +1111,12 @@ Scope {
                 width: shell.panelContentWidth
                 height: 24
 
-                ModuleHeaderRail {
+                UI.ModuleHeaderRail {
                     anchors {
                         left: parent.left
                         verticalCenter: parent.verticalCenter
                     }
-                    tone: theme.clockHeaderAccent
+                    tone: shell.localTimeSourceTone
                 }
 
                 Text {
@@ -1257,13 +1295,13 @@ Scope {
                     width: parent.width
                     height: 31
 
-                    ModuleHeaderRail {
+                    UI.ModuleHeaderRail {
                         anchors {
                             left: parent.left
                             verticalCenter: parent.verticalCenter
                             verticalCenterOffset: -6
                         }
-                        tone: theme.calendarHeaderAccent
+                        tone: shell.calendarSourceTone
                     }
 
                     Text {
@@ -1521,7 +1559,7 @@ Scope {
                     width: parent.width
                     height: 24
 
-                    ModuleHeaderRail {
+                    UI.ModuleHeaderRail {
                         anchors {
                             left: parent.left
                             verticalCenter: parent.verticalCenter
@@ -1905,7 +1943,7 @@ Scope {
                     width: parent.width
                     height: shell.radarHeaderHeight
 
-                    ModuleHeaderRail {
+                    UI.ModuleHeaderRail {
                         anchors {
                             left: parent.left
                             verticalCenter: parent.verticalCenter
@@ -2266,12 +2304,22 @@ Scope {
     }
 
     Timer {
+        id: sensorDisplayTimer
+        repeat: false
+        onTriggered: {
+            if (shell.sensorPendingReading !== null)
+                shell.applySensorReading(shell.sensorPendingReading);
+        }
+    }
+
+    Timer {
         interval: 5000
         running: true
         repeat: true
         onTriggered: {
             if (shell.sensorAvailable)
-                shell.sensorFresh = Date.now() - shell.sensorLastUpdateMs
+                shell.sensorFresh = shell.sensorLastSeenMs > 0
+                    && Date.now() - shell.sensorLastSeenMs
                     <= 60000;
             if (shell.weatherAvailable)
                 shell.weatherFresh = Date.now() - shell.weatherLastUpdateMs

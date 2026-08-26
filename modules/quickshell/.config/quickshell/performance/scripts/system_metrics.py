@@ -348,6 +348,9 @@ def read_gpu(gpu: AmdGpuDevice) -> dict[str, Any]:
         "temperature_c": temperature_c(
             find_labeled_input(gpu.hwmon, "temp", "edge")
         ),
+        "hotspot_temperature_c": temperature_c(
+            find_labeled_input(gpu.hwmon, "temp", "junction")
+        ),
         "power_w": power_w(
             find_labeled_input(gpu.hwmon, "power", "PPT", "average")
         ),
@@ -497,10 +500,14 @@ def stream(interval: float, once: bool, machine_config: Path) -> int:
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, stop)
 
+    next_sample = time.monotonic() + interval
     while not finished:
-        time.sleep(interval)
+        remaining = next_sample - time.monotonic()
+        if remaining > 0:
+            time.sleep(remaining)
         if finished:
             break
+        next_sample += interval
         try:
             (
                 reading,
@@ -519,11 +526,12 @@ def stream(interval: float, once: bool, machine_config: Path) -> int:
             )
         except (OSError, ValueError) as error:
             print(f"system metrics failed: {error}", file=sys.stderr, flush=True)
-            continue
-
-        print(json.dumps(reading, separators=(",", ":")), flush=True)
-        if once:
-            break
+        else:
+            print(json.dumps(reading, separators=(",", ":")), flush=True)
+            if once:
+                break
+        if next_sample <= time.monotonic():
+            next_sample = time.monotonic() + interval
 
     return 0
 
