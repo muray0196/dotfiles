@@ -896,13 +896,14 @@ Scope {
 
         required property string label
         required property var samples
+        property int valueSize: 18
 
-        implicitHeight: 27
+        implicitHeight: 31
 
         Column {
             anchors.centerIn: parent
             width: parent.width
-            spacing: -2
+            spacing: -1
 
             Text {
                 width: parent.width
@@ -910,13 +911,13 @@ Scope {
                 text: summaryTemperatureMetric.label
                 color: theme.textMuted
                 font.family: shell.smallLabelFont
-                font.pixelSize: 8
+                font.pixelSize: 9
                 font.weight: Font.Medium
             }
 
             Item {
                 width: parent.width
-                height: 20
+                height: 22
 
                 Row {
                     anchors.centerIn: parent
@@ -929,7 +930,7 @@ Scope {
                             summaryTemperatureMetric.samples)
                         color: theme.textPrimary
                         font.family: shell.numericFont
-                        font.pixelSize: 18
+                        font.pixelSize: summaryTemperatureMetric.valueSize
                         font.weight: Font.Normal
                     }
 
@@ -938,10 +939,61 @@ Scope {
                         text: "°C"
                         color: theme.textMuted
                         font.family: shell.smallLabelFont
-                        font.pixelSize: 11
+                        font.pixelSize: 10
                         font.weight: Font.Medium
                     }
                 }
+            }
+        }
+    }
+
+    component SummaryTemperatureRow: Item {
+        id: summaryTemperatureRow
+
+        required property string label
+        required property var samples
+
+        implicitHeight: 19
+
+        Text {
+            anchors {
+                left: parent.left
+                leftMargin: 4
+                verticalCenter: parent.verticalCenter
+            }
+            text: summaryTemperatureRow.label
+            color: theme.textMuted
+            font.family: shell.smallLabelFont
+            font.pixelSize: 9
+            font.weight: Font.Medium
+        }
+
+        Row {
+            anchors {
+                right: parent.right
+                rightMargin: 4
+                verticalCenter: parent.verticalCenter
+            }
+            spacing: 1
+
+            Text {
+                id: summaryTemperatureRowValue
+
+                text: historyStore.temperaturePeakText(
+                    summaryTemperatureRow.samples)
+                color: theme.textPrimary
+                font.family: shell.numericFont
+                font.pixelSize: 16
+                font.weight: Font.Normal
+            }
+
+            Text {
+                anchors.baseline: summaryTemperatureRowValue.baseline
+                text: "°C"
+                color: theme.textMuted
+                font.family: shell.smallLabelFont
+                font.pixelSize: 9
+                font.weight: Font.Medium
             }
         }
     }
@@ -955,44 +1007,54 @@ Scope {
         property bool hotspotVisible: false
         property var hotspotSamples: []
 
-        implicitHeight: 38
+        implicitHeight: 52
 
         Column {
-            anchors.centerIn: parent
-            width: parent.width
+            anchors.fill: parent
             spacing: 0
 
             Text {
                 width: parent.width
-                height: 11
+                height: 14
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
                 text: summaryDeviceMetric.label
                 color: summaryDeviceMetric.accent
                 font.family: shell.smallLabelFont
-                font.pixelSize: 9
+                font.pixelSize: 11
                 font.weight: Font.Medium
             }
 
-            Row {
+            Item {
                 width: parent.width
-                height: 27
+                height: parent.height - 14
 
                 SummaryTemperatureMetric {
-                    width: summaryDeviceMetric.hotspotVisible
-                        ? parent.width / 2 : parent.width
-                    height: parent.height
-                    label: summaryDeviceMetric.hotspotVisible
-                        ? "EDGE" : "TEMP"
+                    anchors.fill: parent
+                    visible: !summaryDeviceMetric.hotspotVisible
+                    label: "TEMP"
                     samples: summaryDeviceMetric.temperatureSamples
+                    valueSize: 21
                 }
 
-                SummaryTemperatureMetric {
-                    width: parent.width / 2
-                    height: parent.height
+                Column {
+                    anchors.fill: parent
                     visible: summaryDeviceMetric.hotspotVisible
-                    label: "HOTSPOT"
-                    samples: summaryDeviceMetric.hotspotSamples
+                    spacing: 0
+
+                    SummaryTemperatureRow {
+                        width: parent.width
+                        height: parent.height / 2
+                        label: "EDGE"
+                        samples: summaryDeviceMetric.temperatureSamples
+                    }
+
+                    SummaryTemperatureRow {
+                        width: parent.width
+                        height: parent.height / 2
+                        label: "HOTSPOT"
+                        samples: summaryDeviceMetric.hotspotSamples
+                    }
                 }
             }
         }
@@ -1005,130 +1067,117 @@ Scope {
         required property var samples
         property bool peakValue: false
 
-        implicitHeight: 29
+        implicitHeight: 19
 
-        Column {
-            anchors.centerIn: parent
-            width: parent.width
-            spacing: -2
-
-            Text {
-                width: parent.width
-                horizontalAlignment: Text.AlignHCenter
-                text: summaryPowerValue.label
-                color: theme.textMuted
-                font.family: shell.smallLabelFont
-                font.pixelSize: 8
-                font.weight: Font.Medium
-            }
-
-            Item {
-                width: parent.width
-                height: 20
-
-                Row {
-                    anchors.centerIn: parent
-                    spacing: 1
-
-                    Text {
-                        id: aggregatePowerValue
-
-                        text: summaryPowerValue.peakValue
-                            ? historyStore.powerPeakText(
-                                summaryPowerValue.samples)
-                            : historyStore.powerAverageText(
-                                summaryPowerValue.samples)
-                        color: theme.textPrimary
-                        font.family: shell.numericFont
-                        font.pixelSize: 17
-                        font.weight: Font.Normal
-                    }
-
-                    Text {
-                        anchors.baseline: aggregatePowerValue.baseline
-                        text: "W"
-                        color: theme.textMuted
-                        font.family: shell.smallLabelFont
-                        font.pixelSize: 11
-                        font.weight: Font.Medium
-                    }
-                }
-            }
-        }
-    }
-
-    component SummaryAggregatePower: Item {
-        id: summaryAggregatePower
-
-        required property string sourceLabel
-        required property var samples
-
-        implicitHeight: 34
-
-        Rectangle {
+        Text {
             anchors {
-                top: parent.top
                 left: parent.left
-                right: parent.right
-                leftMargin: 8
-                rightMargin: 8
+                leftMargin: 10
+                verticalCenter: parent.verticalCenter
             }
-            height: 1
-            color: theme.divider
+            text: summaryPowerValue.label
+            color: theme.textMuted
+            font.family: shell.smallLabelFont
+            font.pixelSize: 10
+            font.weight: Font.Medium
         }
 
         Row {
             anchors {
-                left: parent.left
                 right: parent.right
-                bottom: parent.bottom
+                rightMargin: 10
+                verticalCenter: parent.verticalCenter
             }
-            height: 30
+            spacing: 1
+
+            Text {
+                id: aggregatePowerValue
+
+                text: summaryPowerValue.peakValue
+                    ? historyStore.powerPeakText(summaryPowerValue.samples)
+                    : historyStore.powerAverageText(
+                        summaryPowerValue.samples)
+                color: theme.textPrimary
+                font.family: shell.numericFont
+                font.pixelSize: 19
+                font.weight: Font.Normal
+            }
+
+            Text {
+                anchors.baseline: aggregatePowerValue.baseline
+                text: "W"
+                color: theme.textMuted
+                font.family: shell.smallLabelFont
+                font.pixelSize: 10
+                font.weight: Font.Medium
+            }
+        }
+    }
+
+    component SummaryPowerMachine: Item {
+        id: summaryPowerMachine
+
+        required property string machineLabel
+        required property string sourceLabel
+        required property var samples
+        required property color labelTone
+
+        implicitHeight: 57
+
+        Column {
+            anchors.fill: parent
+            spacing: 0
 
             Item {
-                width: parent.width * 0.4
-                height: parent.height
+                width: parent.width
+                height: 18
 
-                Column {
-                    anchors.centerIn: parent
-                    width: parent.width
-                    spacing: -1
-
-                    Text {
-                        width: parent.width
-                        horizontalAlignment: Text.AlignHCenter
-                        text: "COMPUTE POWER"
-                        color: theme.textSecondary
-                        font.family: shell.smallLabelFont
-                        font.pixelSize: 9
-                        font.weight: Font.Medium
+                Text {
+                    anchors {
+                        left: parent.left
+                        leftMargin: 6
+                        verticalCenter: parent.verticalCenter
                     }
+                    text: summaryPowerMachine.machineLabel
+                    color: summaryPowerMachine.labelTone
+                    font.family: shell.smallLabelFont
+                    font.pixelSize: 11
+                    font.weight: Font.Medium
+                }
 
-                    Text {
-                        width: parent.width
-                        horizontalAlignment: Text.AlignHCenter
-                        text: summaryAggregatePower.sourceLabel
-                        color: theme.textMuted
-                        font.family: shell.smallLabelFont
-                        font.pixelSize: 8
-                        font.weight: Font.Normal
+                Text {
+                    anchors {
+                        right: parent.right
+                        rightMargin: 6
+                        verticalCenter: parent.verticalCenter
                     }
+                    text: summaryPowerMachine.sourceLabel
+                    color: theme.textMuted
+                    font.family: shell.smallLabelFont
+                    font.pixelSize: 9
+                    font.weight: Font.Normal
                 }
             }
 
-            SummaryPowerValue {
-                width: parent.width * 0.3
-                height: parent.height
-                label: "AVG"
-                samples: summaryAggregatePower.samples
-            }
+            Column {
+                width: parent.width
+                height: parent.height - 18
+                spacing: 0
 
-            SummaryPowerValue {
-                width: parent.width * 0.3
-                height: parent.height
-                label: "MAX"
-                samples: summaryAggregatePower.samples
-                peakValue: true
+                SummaryPowerValue {
+                    width: parent.width
+                    height: parent.height / 2
+                    label: "AVG"
+                    samples: summaryPowerMachine.samples
+                }
+
+                SummaryPowerValue {
+                    width: parent.width
+                    height: parent.height / 2
+                    label: "MAX"
+                    samples: summaryPowerMachine.samples
+                    peakValue: true
+                }
             }
         }
     }
@@ -1147,17 +1196,18 @@ Scope {
             localMetrics, mainMetrics)
         readonly property int headerHeight: 24
         readonly property int sectionHeaderHeight: 19
-        readonly property int minimumTemperatureRowHeight: 38
-        readonly property int aggregatePowerHeight: 34
-        readonly property int minimumMachineBodyHeight:
-            minimumTemperatureRowHeight + aggregatePowerHeight
+        readonly property int minimumLocalTemperatureHeight: 52
+        readonly property int minimumMainTemperatureHeight: 46
+        readonly property int minimumPowerHeight: 57
         readonly property real rowExtraHeight:
-            Math.max(0, bodyExtraHeight) / 2
+            Math.max(0, bodyExtraHeight) / 3
 
         implicitWidth: shell.panelWidth
         implicitHeight: headerHeight
             + sectionHeaderHeight * 2
-            + minimumMachineBodyHeight * 2
+            + minimumLocalTemperatureHeight
+            + minimumMainTemperatureHeight
+            + minimumPowerHeight
             + shell.moduleDividerHeight * 2
             + shell.panelInset * 2
         radius: 0
@@ -1220,65 +1270,139 @@ Scope {
             UI.SectionHeader {
                 width: parent.width
                 height: performanceSummaryPanel.sectionHeaderHeight
-                label: "LOCAL"
-                metadata: "TEMP MAX"
-                labelTone: performanceSummaryPanel.localFresh
-                    ? theme.textPrimary : theme.textDisabled
+                label: "PEAK TEMPERATURE"
+                metadata: "10 MIN MAX"
             }
 
             Item {
                 width: parent.width
-                height: performanceSummaryPanel.minimumMachineBodyHeight
+                height: performanceSummaryPanel.minimumLocalTemperatureHeight
                     + performanceSummaryPanel.rowExtraHeight
 
-                Column {
+                Row {
                     anchors.fill: parent
                     spacing: 0
 
-                    Row {
-                        width: parent.width
+                    Item {
+                        width: 44
                         height: parent.height
-                            - performanceSummaryPanel.aggregatePowerHeight
 
-                        SummaryDeviceMetric {
-                            width: parent.width / 3
-                            height: parent.height
-                            label: "CPU"
-                            temperatureSamples:
-                                historyStore.localCpuTemperature
-                            accent: theme.cpuAccent
+                        Rectangle {
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
+                            }
+                            width: 2
+                            height: 26
+                            color: performanceSummaryPanel.localFresh
+                                ? theme.statusOk : theme.textDisabled
                         }
 
-                        SummaryDeviceMetric {
-                            width: parent.width / 3
-                            height: parent.height
-                            label: "GPU 1"
-                            temperatureSamples:
-                                historyStore.localGpu1Temperature
-                            hotspotVisible: true
-                            hotspotSamples:
-                                historyStore.localGpu1Hotspot
-                            accent: theme.gpuAccent
-                        }
-
-                        SummaryDeviceMetric {
-                            width: parent.width / 3
-                            height: parent.height
-                            label: "GPU 2"
-                            temperatureSamples:
-                                historyStore.localGpu2Temperature
-                            hotspotVisible: true
-                            hotspotSamples:
-                                historyStore.localGpu2Hotspot
-                            accent: theme.gpuAccent
+                        Text {
+                            anchors {
+                                left: parent.left
+                                leftMargin: 7
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: "LOCAL"
+                            color: performanceSummaryPanel.localFresh
+                                ? theme.textPrimary : theme.textDisabled
+                            font.family: shell.smallLabelFont
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
                         }
                     }
 
-                    SummaryAggregatePower {
-                        width: parent.width
-                        height: performanceSummaryPanel.aggregatePowerHeight
-                        sourceLabel: "CPU + GPU1 + GPU2"
-                        samples: historyStore.localComputePower
+                    SummaryDeviceMetric {
+                        width: 56
+                        height: parent.height
+                        label: "CPU"
+                        temperatureSamples:
+                            historyStore.localCpuTemperature
+                        accent: theme.cpuAccent
+                    }
+
+                    SummaryDeviceMetric {
+                        width: (parent.width - 100) / 2
+                        height: parent.height
+                        label: "GPU 1"
+                        temperatureSamples:
+                            historyStore.localGpu1Temperature
+                        hotspotVisible: true
+                        hotspotSamples:
+                            historyStore.localGpu1Hotspot
+                        accent: theme.gpuAccent
+                    }
+
+                    SummaryDeviceMetric {
+                        width: (parent.width - 100) / 2
+                        height: parent.height
+                        label: "GPU 2"
+                        temperatureSamples:
+                            historyStore.localGpu2Temperature
+                        hotspotVisible: true
+                        hotspotSamples:
+                            historyStore.localGpu2Hotspot
+                        accent: theme.gpuAccent
+                    }
+                }
+            }
+
+            Item {
+                width: parent.width
+                height: performanceSummaryPanel.minimumMainTemperatureHeight
+                    + performanceSummaryPanel.rowExtraHeight
+
+                Row {
+                    anchors.fill: parent
+                    spacing: 0
+
+                    Item {
+                        width: 44
+                        height: parent.height
+
+                        Rectangle {
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
+                            }
+                            width: 2
+                            height: 26
+                            color: performanceSummaryPanel.mainFresh
+                                ? theme.statusOk : theme.textDisabled
+                        }
+
+                        Text {
+                            anchors {
+                                left: parent.left
+                                leftMargin: 7
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: "MAIN"
+                            color: performanceSummaryPanel.mainFresh
+                                ? theme.textPrimary : theme.textDisabled
+                            font.family: shell.smallLabelFont
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
+                        }
+                    }
+
+                    SummaryDeviceMetric {
+                        width: (parent.width - 44) / 2
+                        height: parent.height
+                        label: "CPU"
+                        temperatureSamples:
+                            historyStore.mainCpuTemperature
+                        accent: theme.cpuAccent
+                    }
+
+                    SummaryDeviceMetric {
+                        width: (parent.width - 44) / 2
+                        height: parent.height
+                        label: "GPU"
+                        temperatureSamples:
+                            historyStore.mainGpuTemperature
+                        accent: theme.gpuAccent
                     }
                 }
             }
@@ -1290,51 +1414,47 @@ Scope {
             UI.SectionHeader {
                 width: parent.width
                 height: performanceSummaryPanel.sectionHeaderHeight
-                label: "MAIN"
-                metadata: "TEMP MAX"
-                labelTone: performanceSummaryPanel.mainFresh
-                    ? theme.textPrimary : theme.textDisabled
+                label: "COMPUTE POWER"
+                metadata: "AVG / MAX"
             }
 
             Item {
                 width: parent.width
-                height: performanceSummaryPanel.minimumMachineBodyHeight
+                height: performanceSummaryPanel.minimumPowerHeight
                     + performanceSummaryPanel.rowExtraHeight
 
-                Column {
+                Row {
                     anchors.fill: parent
-                    spacing: 0
 
-                    Row {
-                        width: parent.width
+                    SummaryPowerMachine {
+                        width: parent.width / 2
                         height: parent.height
-                            - performanceSummaryPanel.aggregatePowerHeight
-
-                        SummaryDeviceMetric {
-                            width: parent.width / 2
-                            height: parent.height
-                            label: "CPU"
-                            temperatureSamples:
-                                historyStore.mainCpuTemperature
-                            accent: theme.cpuAccent
-                        }
-
-                        SummaryDeviceMetric {
-                            width: parent.width / 2
-                            height: parent.height
-                            label: "GPU"
-                            temperatureSamples:
-                                historyStore.mainGpuTemperature
-                            accent: theme.gpuAccent
-                        }
+                        machineLabel: "LOCAL"
+                        sourceLabel: "CPU + GPU1 + GPU2"
+                        samples: historyStore.localComputePower
+                        labelTone: performanceSummaryPanel.localFresh
+                            ? theme.textPrimary : theme.textDisabled
                     }
 
-                    SummaryAggregatePower {
-                        width: parent.width
-                        height: performanceSummaryPanel.aggregatePowerHeight
+                    SummaryPowerMachine {
+                        width: parent.width / 2
+                        height: parent.height
+                        machineLabel: "MAIN"
                         sourceLabel: "CPU + GPU"
                         samples: historyStore.mainComputePower
+                        labelTone: performanceSummaryPanel.mainFresh
+                            ? theme.textPrimary : theme.textDisabled
                     }
+                }
+
+                Rectangle {
+                    anchors {
+                        horizontalCenter: parent.horizontalCenter
+                        verticalCenter: parent.verticalCenter
+                    }
+                    width: 1
+                    height: parent.height - 10
+                    color: theme.divider
                 }
             }
         }
