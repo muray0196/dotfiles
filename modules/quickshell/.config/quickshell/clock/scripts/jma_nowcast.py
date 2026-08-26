@@ -7,11 +7,9 @@ import argparse
 import json
 import math
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from clock_config import DEFAULT_CONFIG, load_clock_config
@@ -34,8 +32,6 @@ TILE_SIZE = 256
 VIEWPORT_WIDTH = 280
 VIEWPORT_HEIGHT = 192
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) QuickshellNowcastWidget/1.0"
-RETRY_DELAYS = (5, 15)
-RETRYABLE_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
 FRAME_INTERVAL_MINUTES = 10
 
 
@@ -94,11 +90,11 @@ def parse_frame_time(value: str) -> datetime:
 
 def parse_manifests(
     observation_manifest: Any,
-    forecast_manifest: Any | None = None,
-    include_animation_frames: bool = True,
+    forecast_manifest: Any | None,
     *,
-    latitude: float = 0.0,
-    longitude: float = 0.0,
+    include_animation_frames: bool,
+    latitude: float,
+    longitude: float,
 ) -> dict[str, Any]:
     observation_frames = usable_frames(
         observation_manifest, "observation"
@@ -182,8 +178,6 @@ def parse_manifests(
 
     return {
         "reference_time": int(current_time.timestamp()),
-        "display_zoom": DISPLAY_ZOOM,
-        "radar_zoom": RADAR_ZOOM,
         "radar_scale": radar_scale,
         "tile_size": TILE_SIZE,
         "grid_columns": radar_last_x - radar_origin_x + 1,
@@ -201,17 +195,6 @@ def parse_manifests(
     }
 
 
-def parse_manifest(
-    manifest: Any, *, latitude: float = 0.0, longitude: float = 0.0
-) -> dict[str, Any]:
-    """Parse observation frames without fetching optional forecasts."""
-    return parse_manifests(
-        manifest,
-        latitude=latitude,
-        longitude=longitude,
-    )
-
-
 def download_manifest(url: str, timeout: float) -> Any:
     request = Request(
         url,
@@ -219,37 +202,6 @@ def download_manifest(url: str, timeout: float) -> Any:
     )
     with urlopen(request, timeout=timeout) as response:
         return json.load(response)
-
-
-def fetch_manifest(url: str, timeout: float) -> Any:
-    total_attempts = len(RETRY_DELAYS) + 1
-
-    for attempt in range(total_attempts):
-        try:
-            return download_manifest(url, timeout)
-        except HTTPError as error:
-            if (
-                error.code not in RETRYABLE_HTTP_STATUSES
-                or attempt == total_attempts - 1
-            ):
-                raise
-            retry_error: OSError = error
-        except OSError as error:
-            if attempt == total_attempts - 1:
-                raise
-            retry_error = error
-
-        delay = RETRY_DELAYS[attempt]
-        print(
-            "JMA nowcast download failed "
-            f"(attempt {attempt + 1}/{total_attempts}); "
-            f"retrying in {delay}s: {retry_error}",
-            file=sys.stderr,
-            flush=True,
-        )
-        time.sleep(delay)
-
-    raise RuntimeError("unreachable")
 
 
 def main() -> int:
@@ -284,7 +236,7 @@ def main() -> int:
         observation_manifest = (
             json.loads(args.file.read_text(encoding="utf-8"))
             if args.file is not None
-            else fetch_manifest(OBSERVATION_MANIFEST_URL, args.timeout)
+            else download_manifest(OBSERVATION_MANIFEST_URL, args.timeout)
         )
         include_animation_frames = (
             args.animation_frames or args.forecast_file is not None
@@ -296,7 +248,7 @@ def main() -> int:
             )
         elif include_animation_frames and args.file is None:
             try:
-                forecast_manifest = fetch_manifest(
+                forecast_manifest = download_manifest(
                     FORECAST_MANIFEST_URL, args.timeout
                 )
             except (OSError, ValueError, json.JSONDecodeError) as error:

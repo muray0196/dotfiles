@@ -13,19 +13,14 @@ QtObject {
     readonly property color radarTelemetryBackground: "#b30b0d12"
     readonly property color radarGrid: "#20f5f7ff"
     readonly property color radarRangeRing: "#42f5f7ff"
-    readonly property color radarMarkerHalo: "#e6ffffff"
-    readonly property color radarMarkerCore: "#e85d75"
 
     // Text hierarchy
     readonly property color textPrimary: "#f5f7ff"
     readonly property color textSecondary: "#c7cad5"
     readonly property color textMuted: "#aeb3c2"
-    readonly property string textDimHex: "#8b8e99"
-    readonly property color textDim: textDimHex
     readonly property color textDisabled: "#7f8492"
     readonly property color textTertiary: "#7f8492"
     readonly property color radarUnavailableText: "#555862"
-    readonly property color radarPlaceText: "#d8dbe5"
 
     // Shared module typography
     readonly property int moduleFooterLabelSize: 10
@@ -39,8 +34,6 @@ QtObject {
     readonly property color statusCaution: "#e0af68"
     readonly property color statusError: "#f7768e"
     readonly property color statusUnknown: "#7f8492"
-    readonly property color statusOkText: "#b9d99d"
-    readonly property color statusErrorText: "#efa0ad"
 
     // Resource identity
     readonly property color cpuAccent: "#7dcfff"

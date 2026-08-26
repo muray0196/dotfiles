@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import signal
 import socket
 import sys
@@ -28,9 +29,24 @@ MEBIBYTE = 1024 * 1024
 
 def load_config(path: Path) -> tuple[str, str]:
     data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("remote config must be a JSON object")
     endpoint = data.get("endpoint")
     token = data.get("token")
-    if not isinstance(endpoint, str) or not endpoint.startswith("http://"):
+    if not isinstance(endpoint, str):
+        raise ValueError("remote endpoint must be an HTTP URL")
+    try:
+        parsed = urlsplit(endpoint)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError("remote endpoint must be an HTTP URL") from error
+    if (
+        parsed.scheme != "http"
+        or not hostname
+        or (port is not None and port <= 0)
+        or any(character.isspace() for character in endpoint)
+    ):
         raise ValueError("remote endpoint must be an HTTP URL")
     if not isinstance(token, str) or not token:
         raise ValueError("remote bearer token is missing")
@@ -65,7 +81,12 @@ def ipv4_endpoints(endpoint: str) -> list[str]:
     return candidates
 
 
-def fetch_snapshot(endpoint: str, token: str, timeout: float) -> dict[str, Any]:
+def fetch_snapshot(
+    endpoint: str,
+    token: str,
+    timeout: float,
+    preferred_endpoint: str | None = None,
+) -> tuple[dict[str, Any], str]:
     parsed = urlsplit(endpoint)
     hostname = parsed.hostname
     port = parsed.port or 80
@@ -79,27 +100,38 @@ def fetch_snapshot(endpoint: str, token: str, timeout: float) -> dict[str, Any]:
         "User-Agent": "QuickshellPerformanceWidget/1.0",
         "Host": host_header,
     }
-    candidates = [*ipv4_endpoints(endpoint), endpoint]
     last_error: OSError | None = None
 
-    for candidate in candidates:
+    def fetch_candidate(candidate: str) -> tuple[dict[str, Any], str]:
         request = Request(candidate, headers=headers)
+        with urlopen(request, timeout=timeout) as response:
+            snapshot = json.load(response)
+        if not isinstance(snapshot, dict):
+            raise ValueError("remote response must be a JSON object")
+        return snapshot, candidate
+
+    if preferred_endpoint is not None:
         try:
-            with urlopen(request, timeout=timeout) as response:
-                snapshot = json.load(response)
-            break
+            return fetch_candidate(preferred_endpoint)
         except HTTPError:
             raise
         except OSError as error:
             last_error = error
-    else:
-        if last_error is not None:
-            raise last_error
-        raise OSError("remote endpoint has no usable address")
 
-    if not isinstance(snapshot, dict):
-        raise ValueError("remote response must be a JSON object")
-    return snapshot
+    candidates = [*ipv4_endpoints(endpoint), endpoint]
+    for candidate in candidates:
+        if candidate == preferred_endpoint:
+            continue
+        try:
+            return fetch_candidate(candidate)
+        except HTTPError:
+            raise
+        except OSError as error:
+            last_error = error
+
+    if last_error is not None:
+        raise last_error
+    raise OSError("remote endpoint has no usable address")
 
 
 def metric_map(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -127,7 +159,10 @@ def numeric_metric(
     if metric is None or metric.get("unit") != unit:
         return None
     value = metric.get("value")
-    return float(value) if isinstance(value, (int, float)) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    numeric_value = float(value)
+    return numeric_value if math.isfinite(numeric_value) else None
 
 
 def discrete_gpu(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -137,7 +172,9 @@ def discrete_gpu(snapshot: dict[str, Any]) -> dict[str, Any]:
         gpu
         for gpu in gpus
         if isinstance(gpu, dict)
+        and not isinstance(gpu.get("index"), bool)
         and isinstance(gpu.get("index"), int)
+        and not isinstance(gpu.get("memory_bytes"), bool)
         and isinstance(gpu.get("memory_bytes"), int)
         and gpu["memory_bytes"] > 0
     ]
@@ -147,7 +184,14 @@ def discrete_gpu(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 
 def usage_percent(used: float | None, total: float | None) -> float | None:
-    if used is None or total is None or total <= 0:
+    if (
+        used is None
+        or total is None
+        or not math.isfinite(used)
+        or not math.isfinite(total)
+        or used < 0
+        or total <= 0
+    ):
         return None
     return round(min(100.0, max(0.0, 100.0 * used / total)), 1)
 
@@ -159,10 +203,14 @@ def normalize(snapshot: dict[str, Any]) -> dict[str, Any]:
     gpu_prefix = f"GPU{gpu_number}"
 
     memory = snapshot.get("memory")
+    raw_memory_total = (
+        memory.get("total_bytes") if isinstance(memory, dict) else None
+    )
     memory_total = (
-        float(memory.get("total_bytes"))
-        if isinstance(memory, dict)
-        and isinstance(memory.get("total_bytes"), (int, float))
+        float(raw_memory_total)
+        if not isinstance(raw_memory_total, bool)
+        and isinstance(raw_memory_total, (int, float))
+        and math.isfinite(float(raw_memory_total))
         else None
     )
     memory_used_mb = numeric_metric(metrics, "RAM usage", "MB")
@@ -180,43 +228,55 @@ def normalize(snapshot: dict[str, Any]) -> dict[str, Any]:
         if isinstance(cpu_info, dict) and isinstance(cpu_info.get("model"), str)
         else None
     )
+    cpu_usage = numeric_metric(metrics, "CPU usage", "%")
+    gpu_usage = numeric_metric(metrics, f"{gpu_prefix} usage", "%")
+    memory_usage = usage_percent(memory_used, memory_total)
+    vram_usage = usage_percent(vram_used, vram_total)
+    if cpu_usage is None or not 0 <= cpu_usage <= 100:
+        raise ValueError("required CPU usage metric is invalid")
+    if gpu_usage is None or not 0 <= gpu_usage <= 100:
+        raise ValueError("required GPU usage metric is invalid")
+    if memory_usage is None:
+        raise ValueError("required MEMORY metric is missing")
+    if vram_usage is None:
+        raise ValueError("required VRAM metric is missing")
 
     normalized: dict[str, Any] = {
-        "schema_version": 1,
-        "host": snapshot.get("host", "main-pc"),
-        "timestamp": int(time.time()),
+        "schema_version": 2,
+        "host": (
+            snapshot["host"]
+            if isinstance(snapshot.get("host"), str)
+            else "main-pc"
+        ),
         "cpu": {
             "model": cpu_model,
-            "usage_percent": numeric_metric(metrics, "CPU usage", "%"),
+            "usage_percent": cpu_usage,
             "temperature_c": numeric_metric(metrics, "CPU temperature", "°C"),
             "power_w": numeric_metric(metrics, "CPU power", "W"),
         },
-        "gpu": {
-            "model": gpu.get("device"),
-            "usage_percent": numeric_metric(metrics, f"{gpu_prefix} usage", "%"),
-            "temperature_c": numeric_metric(
-                metrics, f"{gpu_prefix} temperature", "°C"
-            ),
-            "power_w": numeric_metric(metrics, f"{gpu_prefix} power", "W"),
-        },
+        "gpus": [
+            {
+                "model": gpu.get("device"),
+                "usage_percent": gpu_usage,
+                "temperature_c": numeric_metric(
+                    metrics, f"{gpu_prefix} temperature", "°C"
+                ),
+                "power_w": numeric_metric(
+                    metrics, f"{gpu_prefix} power", "W"
+                ),
+                "vram": {
+                    "used_bytes": vram_used,
+                    "total_bytes": vram_total,
+                    "usage_percent": vram_usage,
+                },
+            }
+        ],
         "memory": {
             "used_bytes": memory_used,
             "total_bytes": memory_total,
-            "usage_percent": usage_percent(memory_used, memory_total),
-        },
-        "vram": {
-            "used_bytes": vram_used,
-            "total_bytes": vram_total,
-            "usage_percent": usage_percent(vram_used, vram_total),
+            "usage_percent": memory_usage,
         },
     }
-
-    for section in ("cpu", "gpu"):
-        if normalized[section]["usage_percent"] is None:
-            raise ValueError(f"required {section.upper()} usage metric is missing")
-    for section in ("memory", "vram"):
-        if normalized[section]["usage_percent"] is None:
-            raise ValueError(f"required {section.upper()} metric is missing")
     return normalized
 
 
@@ -239,6 +299,7 @@ def stream(
 
     finished = False
     last_error_log = 0.0
+    preferred_endpoint: str | None = None
 
     def stop(*_: object) -> None:
         nonlocal finished
@@ -252,16 +313,21 @@ def stream(
         if automation is not None:
             automation.tick()
         try:
-            snapshot = fetch_snapshot(endpoint, token, timeout)
+            snapshot, preferred_endpoint = fetch_snapshot(
+                endpoint, token, timeout, preferred_endpoint
+            )
             reading = normalize(snapshot)
             if automation is not None:
                 automation.heartbeat()
             print(json.dumps(reading, separators=(",", ":")), flush=True)
         except (OSError, ValueError, json.JSONDecodeError) as error:
+            preferred_endpoint = None
             now = time.monotonic()
             if now - last_error_log >= 60:
                 print(f"remote metrics failed: {error}", file=sys.stderr, flush=True)
                 last_error_log = now
+            if once:
+                return 1
 
         if automation is not None:
             automation.tick()
@@ -298,18 +364,17 @@ def main() -> int:
     if args.automation:
         try:
             machine_config = load_machine_config(args.machine_config)
+            if machine_config.automation_enabled:
+                automation = DesktopAutomation(
+                    settings_path=args.automation_settings,
+                    machine_config=machine_config,
+                )
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
             print(
                 f"desktop automation disabled: {error}",
                 file=sys.stderr,
                 flush=True,
             )
-        else:
-            if machine_config.automation_enabled:
-                automation = DesktopAutomation(
-                    settings_path=args.automation_settings,
-                    machine_config=machine_config,
-                )
     return stream(args.config, args.interval, args.timeout, args.once, automation)
 
 

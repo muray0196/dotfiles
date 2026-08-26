@@ -10,30 +10,28 @@ Scope {
         id: theme
     }
 
-    property int widgetWidth: 312
+    readonly property int widgetWidth: 312
     property bool widgetsVisible: true
     readonly property string clockScriptsDir: Quickshell.shellDir + "/scripts"
     readonly property string clockConfigPath: Quickshell.shellDir + "/local.json"
     readonly property int panelContentWidth: 280
-    readonly property int panelTitleSize: 18
-    readonly property int sectionTitleSize: 16
-    readonly property int panelMetaSize: 11
     readonly property int panelGap: 10
     readonly property int panelBottomInset: 10
     readonly property int moduleDividerHeight: 7
     readonly property int radarHeaderHeight: 31
-    property var weekdayNames: ["日", "月", "火", "水", "木", "金", "土"]
     readonly property var calendarWeekdayLabels:
         ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
     property var holidayEntries: ({})
     property bool holidayDataAvailable: false
+    property bool holidayDataStale: false
     property date calendarDate: new Date()
-    property int currentYear: calendarDate.getFullYear()
-    property int currentMonth: calendarDate.getMonth() + 1
-    property int currentDay: calendarDate.getDate()
-    property int currentWeekday: calendarDate.getDay()
-    property string currentDateKey: dateKey(currentYear, currentMonth, currentDay)
-    property string currentDateLabel: currentYear + " / "
+    readonly property int currentYear: calendarDate.getFullYear()
+    readonly property int currentMonth: calendarDate.getMonth() + 1
+    readonly property int currentDay: calendarDate.getDate()
+    readonly property int currentWeekday: calendarDate.getDay()
+    readonly property string currentDateKey:
+        dateKey(currentYear, currentMonth, currentDay)
+    readonly property string currentDateLabel: currentYear + " / "
         + padded(currentMonth) + " / " + padded(currentDay) + " · "
         + calendarWeekdayLabels[currentWeekday]
     property string currentTimeZoneAbbreviation: ""
@@ -51,7 +49,7 @@ Scope {
         ? theme.statusOk : theme.statusCaution
     readonly property bool calendarSourceCurrent: validDate(calendarDate)
     readonly property color calendarSourceTone: !calendarSourceCurrent
-        ? theme.statusError : holidayDataAvailable
+        ? theme.statusError : holidayDataAvailable && !holidayDataStale
         ? theme.statusOk : theme.statusCaution
 
     function padded(value) {
@@ -150,31 +148,150 @@ Scope {
         weatherTimer.restart();
     }
 
-    function millisecondsUntilNextRadarFetch() {
-        const now = new Date();
-        const nextFetch = new Date(
-            now.getFullYear(), now.getMonth(), now.getDate(),
-            now.getHours(), now.getMinutes(), 30, 0
-        );
-        if (nextFetch <= now)
-            nextFetch.setMinutes(nextFetch.getMinutes() + 1);
-        return Math.max(1, nextFetch.getTime() - now.getTime());
+    function radarCycleEpochMs(timestampMs) {
+        return Math.floor(timestampMs / radarCycleDurationMs)
+            * radarCycleDurationMs;
     }
 
-    function requestRadarFetch() {
-        if (radarProcess.running) {
-            radarFetchPending = true;
+    function radarAttemptOffsetAt(cycleEpochMs, timestampMs) {
+        let currentOffset = -1;
+        for (const offset of radarAttemptOffsetsSeconds) {
+            if (cycleEpochMs + offset * 1000 > timestampMs)
+                break;
+            currentOffset = offset;
+        }
+        return currentOffset;
+    }
+
+    function scheduleRadarFetchAt(cycleEpochMs, offsetSeconds) {
+        const targetEpochMs = cycleEpochMs + offsetSeconds * 1000;
+        radarScheduledCycleEpochMs = cycleEpochMs;
+        radarScheduledAttemptOffsetSeconds = offsetSeconds;
+        radarTimer.interval = Math.max(1, targetEpochMs - Date.now());
+        radarTimer.restart();
+        console.info(
+            "Rain radar fetch scheduled:",
+            new Date(targetEpochMs).toISOString(),
+            "offset +" + offsetSeconds + "s"
+        );
+    }
+
+    function scheduleNextRadarCycle() {
+        const nowMs = Date.now();
+        let cycleEpochMs = radarCycleEpochMs(nowMs);
+        const firstOffset = radarAttemptOffsetsSeconds[0];
+        if (cycleEpochMs + firstOffset * 1000 <= nowMs)
+            cycleEpochMs += radarCycleDurationMs;
+        radarRetrying = false;
+        scheduleRadarFetchAt(cycleEpochMs, firstOffset);
+    }
+
+    function scheduleRadarRetryForCycle(cycleEpochMs, afterOffsetSeconds) {
+        const nowMs = Date.now();
+        for (const offset of radarAttemptOffsetsSeconds) {
+            const targetEpochMs = cycleEpochMs + offset * 1000;
+            if (offset <= afterOffsetSeconds || targetEpochMs <= nowMs)
+                continue;
+            radarRetrying = true;
+            scheduleRadarFetchAt(cycleEpochMs, offset);
             return;
         }
-        radarFetchPending = false;
-        radarIncludeAnimationFrames = observedWeatherIsRain();
-        radarUpdateReceived = false;
-        radarProcess.running = true;
+        scheduleNextRadarCycle();
     }
 
-    function scheduleNextRadarFetch() {
-        radarTimer.interval = millisecondsUntilNextRadarFetch();
-        radarTimer.restart();
+    function scheduleRadarForecastEnrichment(
+        cycleEpochMs, afterOffsetSeconds
+    ) {
+        const targetOffset = radarForecastEnrichmentOffsetSeconds;
+        const targetEpochMs = cycleEpochMs + targetOffset * 1000;
+        if (afterOffsetSeconds < targetOffset && targetEpochMs > Date.now()) {
+            radarRetrying = true;
+            scheduleRadarFetchAt(cycleEpochMs, targetOffset);
+            return;
+        }
+        scheduleRadarRetryForCycle(cycleEpochMs, afterOffsetSeconds);
+    }
+
+    function requestRadarFetch(cycleEpochMs, attemptOffsetSeconds) {
+        if (radarProcess.running)
+            return false;
+        radarRequestCycleEpochMs = cycleEpochMs;
+        radarRequestAttemptOffsetSeconds = attemptOffsetSeconds;
+        radarIncludeAnimationFrames = observedWeatherIsRain();
+        radarUpdateReceived = false;
+        radarResponseReferenceEpoch = 0;
+        radarResponseHasForecast = false;
+        radarRequestTileFailed = false;
+        radarProcess.running = true;
+        return true;
+    }
+
+    function requestRadarRefreshNow() {
+        if (radarProcess.running) {
+            radarImmediateFetchPending = true;
+            return;
+        }
+        const nowMs = Date.now();
+        const cycleEpochMs = radarCycleEpochMs(nowMs);
+        radarTimer.stop();
+        radarImmediateFetchPending = false;
+        requestRadarFetch(
+            cycleEpochMs,
+            radarAttemptOffsetAt(cycleEpochMs, nowMs)
+        );
+    }
+
+    function finishRadarFetch(exitCode) {
+        const succeeded = exitCode === 0 && radarUpdateReceived;
+        const expectedReferenceEpoch = radarRequestCycleEpochMs / 1000;
+        const observationCurrent = succeeded
+            && radarResponseReferenceEpoch >= expectedReferenceEpoch;
+
+        if (radarRequestTileFailed) {
+            radarFetchFailed = true;
+            scheduleRadarRetryForCycle(
+                radarRequestCycleEpochMs,
+                radarRequestAttemptOffsetSeconds
+            );
+            return;
+        }
+
+        if (!succeeded)
+            radarFetchFailed = true;
+
+        if (!observationCurrent) {
+            if (radarRequestAttemptOffsetSeconds >= 50) {
+                console.warn(
+                    "Rain radar observation not current; retrying:",
+                    "expected", expectedReferenceEpoch,
+                    "received", radarResponseReferenceEpoch
+                );
+            }
+            scheduleRadarRetryForCycle(
+                radarRequestCycleEpochMs,
+                radarRequestAttemptOffsetSeconds
+            );
+            return;
+        }
+
+        if (radarResponseReferenceEpoch > radarLastLoggedReferenceEpoch) {
+            radarLastLoggedReferenceEpoch = radarResponseReferenceEpoch;
+            console.info(
+                "Rain radar manifest advanced:",
+                new Date(radarResponseReferenceEpoch * 1000).toISOString(),
+                "attempt +" + radarRequestAttemptOffsetSeconds + "s"
+            );
+        }
+
+        if (radarIncludeAnimationFrames && !radarResponseHasForecast) {
+            scheduleRadarForecastEnrichment(
+                radarRequestCycleEpochMs,
+                radarRequestAttemptOffsetSeconds
+            );
+            return;
+        }
+
+        scheduleNextRadarCycle();
     }
 
     function holidayName(key) {
@@ -410,8 +527,6 @@ Scope {
                 height: frameData.tileSize * frameData.scale
 
                 Image {
-                    id: radarTileImage
-
                     function reportStatus() {
                         if (status === Image.Ready) {
                             shell.radarTileReady(
@@ -528,26 +643,38 @@ Scope {
     property int radarPendingTileCount: 0
     property var radarPendingReadyUrls: ({})
     property double radarPendingReferenceEpoch: 0
+    property double radarPendingCycleEpochMs: 0
+    property int radarPendingAttemptOffsetSeconds: -1
     property double radarReferenceEpoch: 0
     property int radarFrameIndex: 0
-    property var radarActiveFrames: radarActiveSet === 0
+    readonly property var radarActiveFrames: radarActiveSet === 0
         ? radarFrameSetA : radarActiveSet === 1 ? radarFrameSetB : []
-    property var radarDisplayedFrame: radarFrameIndex >= 0
+    readonly property var radarDisplayedFrame: radarFrameIndex >= 0
             && radarFrameIndex < radarActiveFrames.length
         ? radarActiveFrames[radarFrameIndex] : null
-    property real radarMetersPerPixel: radarDisplayedFrame !== null
+    readonly property real radarMetersPerPixel: radarDisplayedFrame !== null
         ? radarDisplayedFrame.metersPerPixel : 1
-    property string radarFrameAt: radarDisplayedFrame !== null
+    readonly property string radarFrameAt: radarDisplayedFrame !== null
         ? radarDisplayedFrame.frameAt : ""
-    property int radarFrameOffset: radarDisplayedFrame !== null
-        ? radarDisplayedFrame.offsetMinutes : 0
-    property bool radarFrameForecast: radarDisplayedFrame !== null
+    readonly property bool radarFrameForecast: radarDisplayedFrame !== null
         ? radarDisplayedFrame.forecast : false
     property bool radarAvailable: false
-    property bool radarFetchPending: false
     property bool radarFetchFailed: false
+    property bool radarRetrying: false
     property bool radarIncludeAnimationFrames: false
     property bool radarUpdateReceived: false
+    property double radarResponseReferenceEpoch: 0
+    property bool radarResponseHasForecast: false
+    property bool radarRequestTileFailed: false
+    property bool radarImmediateFetchPending: false
+    property double radarRequestCycleEpochMs: 0
+    property int radarRequestAttemptOffsetSeconds: -1
+    property double radarScheduledCycleEpochMs: 0
+    property int radarScheduledAttemptOffsetSeconds: 50
+    property double radarLastLoggedReferenceEpoch: 0
+    readonly property int radarCycleDurationMs: 5 * 60 * 1000
+    readonly property var radarAttemptOffsetsSeconds: [50, 110, 170, 230]
+    readonly property int radarForecastEnrichmentOffsetSeconds: 170
     readonly property int radarMinimumViewportHeight: 192
     readonly property int radarViewportHeight: Math.max(
         radarMinimumViewportHeight,
@@ -565,11 +692,10 @@ Scope {
     readonly property string radarPlaybackMode: radarAvailable
             && radarActiveFrames.length > 1
         ? "LOOP 1.6S" : "STATIC"
-    readonly property bool radarSourceCurrent:
-        radarAvailable && !radarFetchFailed
-    readonly property color radarSourceTone: radarSourceCurrent
-        ? theme.statusOk : radarAvailable ? theme.statusCaution
-        : radarFetchFailed ? theme.statusError : theme.statusUnknown
+    readonly property color radarSourceTone: !radarAvailable
+        ? (radarFetchFailed ? theme.statusError : theme.statusUnknown)
+        : radarFetchFailed || radarRetrying
+        ? theme.statusCaution : theme.statusOk
     readonly property string radarFrameStatusText: radarAvailable
         ? radarFrameLabel() : radarFetchFailed ? "NO FRAME" : "WAITING FOR FRAME"
 
@@ -747,6 +873,7 @@ Scope {
             }
             holidayEntries = holidays;
             holidayDataAvailable = Object.keys(holidays).length > 0;
+            holidayDataStale = data.stale === true;
         } catch (error) {
             console.warn("Invalid Japanese holiday data:", error);
         }
@@ -774,7 +901,6 @@ Scope {
                     forecast !== null
                         && typeof forecast.hour === "string"
                         && typeof forecast.state === "string"
-                        && typeof forecast.condition === "string"
                         && typeof forecast.temperature === "number"
                         && typeof forecast.precipitation === "number"
                 ).slice(0, 5)
@@ -789,7 +915,7 @@ Scope {
             weatherFetchFailed = false;
             syncRadarAnimation(true);
             if (wasRaining !== observedWeatherIsRain())
-                requestRadarFetch();
+                requestRadarRefreshNow();
         } catch (error) {
             console.warn("Invalid Weathernews observation:", error);
         }
@@ -917,7 +1043,6 @@ Scope {
                     centerPixelY: radar.radar_center_pixel_y,
                     metersPerPixel: radar.meters_per_pixel,
                     frameAt: Qt.formatDateTime(frameDate, "M/d HH:mm"),
-                    frameTime: frame.frame_time,
                     offsetMinutes: frame.offset_minutes,
                     forecast: frame.forecast
                 });
@@ -926,6 +1051,10 @@ Scope {
                 return;
 
             radarUpdateReceived = true;
+            radarResponseReferenceEpoch = radar.reference_time;
+            radarResponseHasForecast = pendingFrames.some(frame =>
+                frame.forecast
+            );
             pendingFrames.sort((left, right) =>
                 left.offsetMinutes - right.offsetMinutes
             );
@@ -933,7 +1062,7 @@ Scope {
             const pendingFrameSet = radarPendingSet === 0
                 ? radarFrameSetA : radarPendingSet === 1
                     ? radarFrameSetB : [];
-            const activeIsNewer = radarAvailable
+            const candidateOlderThanActive = radarAvailable
                 && radar.reference_time < radarReferenceEpoch;
             const activeAlreadyHasFrames = radarAvailable
                 && radar.reference_time === radarReferenceEpoch
@@ -941,7 +1070,7 @@ Scope {
                     ? !radarFramesAddInformation(
                         pendingFrames, radarActiveFrames
                     ) : radarActiveFrames.length === 1);
-            const pendingIsNewer = radarPendingSet !== -1
+            const candidateOlderThanPending = radarPendingSet !== -1
                 && radar.reference_time < radarPendingReferenceEpoch;
             const pendingAlreadyHasFrames = radarPendingSet !== -1
                 && radar.reference_time === radarPendingReferenceEpoch
@@ -949,8 +1078,8 @@ Scope {
                     ? !radarFramesAddInformation(
                         pendingFrames, pendingFrameSet
                     ) : pendingFrameSet.length === 1);
-            if (activeIsNewer || activeAlreadyHasFrames
-                    || pendingIsNewer || pendingAlreadyHasFrames) {
+            if (candidateOlderThanActive || activeAlreadyHasFrames
+                    || candidateOlderThanPending || pendingAlreadyHasFrames) {
                 radarFetchFailed = false;
                 return;
             }
@@ -963,6 +1092,9 @@ Scope {
             radarPendingTileCount = pendingTileCount;
             radarPendingReadyUrls = {};
             radarPendingReferenceEpoch = radar.reference_time;
+            radarPendingCycleEpochMs = radarRequestCycleEpochMs;
+            radarPendingAttemptOffsetSeconds =
+                radarRequestAttemptOffsetSeconds;
             if (pendingSet === 0)
                 radarFrameSetA = pendingFrames;
             else
@@ -997,6 +1129,8 @@ Scope {
         radarPendingTileCount = 0;
         radarPendingReadyUrls = {};
         radarPendingReferenceEpoch = 0;
+        radarPendingCycleEpochMs = 0;
+        radarPendingAttemptOffsetSeconds = -1;
         radarAvailable = true;
         radarFetchFailed = false;
         syncRadarAnimation(true);
@@ -1007,9 +1141,26 @@ Scope {
                 || generation !== radarPendingGeneration)
             return;
 
+        const failedCycleEpochMs = radarPendingCycleEpochMs;
+        const failedAttemptOffsetSeconds =
+            radarPendingAttemptOffsetSeconds;
         radarPendingSet = -1;
+        radarPendingTileCount = 0;
+        radarPendingReadyUrls = {};
         radarPendingReferenceEpoch = 0;
+        radarPendingCycleEpochMs = 0;
+        radarPendingAttemptOffsetSeconds = -1;
         radarFetchFailed = true;
+        radarRequestTileFailed = true;
+        console.warn("Rain radar tile load failed; retrying");
+        if (failedCycleEpochMs > 0) {
+            scheduleRadarRetryForCycle(
+                failedCycleEpochMs,
+                failedAttemptOffsetSeconds
+            );
+        } else {
+            scheduleNextRadarCycle();
+        }
     }
 
     IpcHandler {
@@ -1025,9 +1176,6 @@ Scope {
             shell.widgetsVisible = false;
         }
 
-        function toggle(): void {
-            shell.widgetsVisible = !shell.widgetsVisible;
-        }
     }
 
     component PanelEdge: Item {
@@ -1412,8 +1560,6 @@ Scope {
                 }
 
                 Item {
-                    id: calendarGridFrame
-
                     width: parent.width
                     height: calendarGrid.height
 
@@ -1448,7 +1594,6 @@ Scope {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    visible: modelData.day > 0
                                     text: modelData.day
                                     color: shell.calendarDayColor(modelData)
                                     font.family: "Adwaita Sans"
@@ -1603,6 +1748,7 @@ Scope {
 
                     UI.SectionHeader {
                         width: parent.width
+                        palette: theme
                         label: "INDOOR"
                         metadata: shell.sensorLinkSummary
                         metadataVisible: shell.indoorSourceCurrent
@@ -1663,6 +1809,7 @@ Scope {
 
                     UI.SectionHeader {
                         width: parent.width
+                        palette: theme
                         label: "OUTDOOR"
                         metadata: "OBS " + shell.weatherObservedAt
                         metadataVisible: shell.outdoorSourceCurrent
@@ -1700,8 +1847,6 @@ Scope {
                                 height: 31
 
                                 Text {
-                                    id: outdoorConditionIcon
-
                                     anchors.centerIn: parent
                                     text: shell.weatherAvailable
                                         ? shell.weatherSymbol(shell.weatherState)
@@ -1930,7 +2075,6 @@ Scope {
             }
 
             Column {
-                id: radarContent
                 anchors {
                     bottom: parent.bottom
                     bottomMargin: shell.panelBottomInset
@@ -2064,7 +2208,6 @@ Scope {
                     }
 
                     Text {
-                        id: radarAttribution
                         anchors {
                             right: parent.right
                             bottom: parent.bottom
@@ -2206,7 +2349,7 @@ Scope {
             shell.clockConfigPath
         ]
 
-        onExited: (exitCode, exitStatus) => {
+        onExited: exitCode => {
             if (exitCode !== 0 || !shell.weatherUpdateReceived)
                 shell.weatherFetchFailed = true;
         }
@@ -2254,14 +2397,12 @@ Scope {
                 shell.clockConfigPath
             ]
 
-        onExited: (exitCode, exitStatus) => {
-            if (exitCode !== 0 || !shell.radarUpdateReceived)
-                shell.radarFetchFailed = true;
-        }
-
-        onRunningChanged: {
-            if (!running && shell.radarFetchPending)
-                shell.requestRadarFetch();
+        onExited: exitCode => {
+            shell.finishRadarFetch(exitCode);
+            if (shell.radarImmediateFetchPending) {
+                radarTimer.stop();
+                radarImmediateTimer.restart();
+            }
         }
 
         stdout: SplitParser {
@@ -2283,9 +2424,23 @@ Scope {
         id: radarTimer
         repeat: false
         onTriggered: {
-            shell.requestRadarFetch();
-            shell.scheduleNextRadarFetch();
+            if (!shell.requestRadarFetch(
+                    shell.radarScheduledCycleEpochMs,
+                    shell.radarScheduledAttemptOffsetSeconds
+                )) {
+                shell.scheduleRadarRetryForCycle(
+                    shell.radarScheduledCycleEpochMs,
+                    shell.radarScheduledAttemptOffsetSeconds
+                );
+            }
         }
+    }
+
+    Timer {
+        id: radarImmediateTimer
+        interval: 1
+        repeat: false
+        onTriggered: shell.requestRadarRefreshNow()
     }
 
     Timer {
@@ -2330,8 +2485,7 @@ Scope {
     Component.onCompleted: {
         shell.requestWeatherFetch();
         shell.scheduleNextWeatherFetch();
-        shell.requestRadarFetch();
-        shell.scheduleNextRadarFetch();
+        shell.requestRadarRefreshNow();
     }
 
     Timer {

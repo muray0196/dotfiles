@@ -132,8 +132,13 @@ def refreshed_payload(holidays: dict[str, str]) -> dict[str, Any]:
 
 
 def emit(payload: dict[str, Any], stale: bool = False) -> None:
-    output = dict(payload)
-    output["stale"] = stale
+    first_relevant_date = f"{datetime.now().year:04d}-01-01"
+    holidays = {
+        key: value
+        for key, value in payload["holidays"].items()
+        if key >= first_relevant_date
+    }
+    output = {"holidays": holidays, "stale": stale}
     print(json.dumps(output, ensure_ascii=False, separators=(",", ":")))
 
 

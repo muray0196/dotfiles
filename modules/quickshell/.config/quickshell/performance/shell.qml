@@ -24,7 +24,6 @@ Scope {
     readonly property int moduleDividerHeight: 7
     readonly property int panelInset: 10
     readonly property int pollIntervalSeconds: 2
-    readonly property int metricsCommitFallbackMs: 500
     readonly property int historySampleIntervalMs: 5000
     readonly property int historySampleCapacity: 120
     readonly property int performancePanelGap: 10
@@ -33,35 +32,23 @@ Scope {
     readonly property string smallLabelFont: "Adwaita Mono"
     readonly property string numericFont: "Adwaita Sans"
     property double nowMs: Date.now()
-    property string pendingLocalMetricsLine: ""
-    property string pendingRemoteMetricsLine: ""
-    property bool localMetricsPending: false
-    property bool remoteMetricsPending: false
 
     function updateMetrics(target, line) {
         try {
             const reading = JSON.parse(line);
             if (!reading || typeof reading !== "object")
                 return;
-            const hasMetricPayload = reading.cpu !== undefined
-                || reading.gpu !== undefined
-                || reading.memory !== undefined
-                || reading.vram !== undefined
-                || reading.storage !== undefined
-                || reading.network !== undefined
-                || Array.isArray(reading.gpus);
-            if (reading.schema_version !== 1 || !hasMetricPayload)
+            if (reading.schema_version !== 2
+                    || !Array.isArray(reading.gpus)
+                    || reading.cpu === null
+                    || typeof reading.cpu !== "object"
+                    || reading.memory === null
+                    || typeof reading.memory !== "object")
                 return;
 
             const receivedAt = Date.now();
-            const cpu = reading.cpu && typeof reading.cpu === "object"
-                ? reading.cpu : {};
-            const gpu = reading.gpu && typeof reading.gpu === "object"
-                ? reading.gpu : {};
-            const memory = reading.memory && typeof reading.memory === "object"
-                ? reading.memory : {};
-            const vram = reading.vram && typeof reading.vram === "object"
-                ? reading.vram : {};
+            const cpu = reading.cpu;
+            const memory = reading.memory;
 
             target.host = typeof reading.host === "string"
                 ? reading.host : "";
@@ -76,16 +63,6 @@ Scope {
             target.cpuPower = typeof cpu.power_w === "number"
                 ? cpu.power_w : null;
 
-            target.gpuAvailable = typeof gpu.usage_percent === "number";
-            if (target.gpuAvailable)
-                target.gpuUsage = gpu.usage_percent;
-            if (typeof gpu.model === "string")
-                target.gpuModel = gpu.model;
-            target.gpuTemperature = typeof gpu.temperature_c === "number"
-                ? gpu.temperature_c : null;
-            target.gpuPower = typeof gpu.power_w === "number"
-                ? gpu.power_w : null;
-
             target.memoryAvailable =
                 typeof memory.used_bytes === "number"
                 && typeof memory.total_bytes === "number"
@@ -96,31 +73,8 @@ Scope {
                 target.memoryUsage = memory.usage_percent;
             }
 
-            target.vramAvailable = typeof vram.used_bytes === "number"
-                && typeof vram.total_bytes === "number"
-                && typeof vram.usage_percent === "number";
-            if (target.vramAvailable) {
-                target.vramUsed = vram.used_bytes;
-                target.vramTotal = vram.total_bytes;
-                target.vramUsage = vram.usage_percent;
-            }
-
             const gpuEntries = [];
-            const sourceGpus = Array.isArray(reading.gpus)
-                ? reading.gpus
-                : reading.gpu && typeof reading.gpu === "object"
-                    ? [{
-                        id: "primary",
-                        display_connected: false,
-                        model: gpu.model,
-                        usage_percent: gpu.usage_percent,
-                        temperature_c: gpu.temperature_c,
-                        hotspot_temperature_c:
-                            gpu.hotspot_temperature_c,
-                        power_w: gpu.power_w,
-                        vram: vram
-                    }]
-                    : [];
+            const sourceGpus = reading.gpus;
             for (let index = 0; index < sourceGpus.length; index++) {
                 const sourceGpu = sourceGpus[index];
                 if (!sourceGpu || typeof sourceGpu !== "object")
@@ -135,8 +89,6 @@ Scope {
                     && typeof gpuVram.total_bytes === "number"
                     && typeof gpuVram.usage_percent === "number";
                 gpuEntries.push({
-                    id: typeof sourceGpu.id === "string"
-                        ? sourceGpu.id : "gpu-" + index,
                     displayConnected:
                         sourceGpu.display_connected === true,
                     model: typeof sourceGpu.model === "string"
@@ -164,8 +116,25 @@ Scope {
                 });
             }
             target.gpus = gpuEntries;
+            const primaryGpu = gpuEntries.length > 0
+                ? gpuEntries[0] : null;
+            target.gpuAvailable = primaryGpu !== null
+                && primaryGpu.available;
+            target.gpuUsage = target.gpuAvailable ? primaryGpu.usage : 0;
+            target.gpuModel = primaryGpu !== null ? primaryGpu.model : "";
+            target.gpuTemperature = primaryGpu !== null
+                ? primaryGpu.temperature : null;
+            target.gpuPower = primaryGpu !== null
+                ? primaryGpu.power : null;
 
-            target.storageKnown = reading.storage !== undefined;
+            const primaryVram = primaryGpu !== null
+                ? primaryGpu.vram : null;
+            target.vramAvailable = primaryVram !== null
+                && primaryVram.available;
+            target.vramUsed = target.vramAvailable ? primaryVram.used : 0;
+            target.vramTotal = target.vramAvailable ? primaryVram.total : 0;
+            target.vramUsage = target.vramAvailable ? primaryVram.usage : 0;
+
             target.storageAvailable = reading.storage !== null
                 && typeof reading.storage === "object"
                 && typeof reading.storage.used_bytes === "number"
@@ -194,7 +163,6 @@ Scope {
                         label: volume.label,
                         kind: typeof volume.kind === "string"
                             ? volume.kind : "",
-                        known: true,
                         available: volumeAvailable,
                         used: volumeAvailable ? volume.used_bytes : 0,
                         total: volumeAvailable ? volume.total_bytes : 0,
@@ -205,7 +173,6 @@ Scope {
             }
             target.storageVolumes = storageEntries;
 
-            target.networkKnown = reading.network !== undefined;
             target.networkAvailable = reading.network !== null
                 && typeof reading.network === "object"
                 && typeof reading.network
@@ -254,44 +221,6 @@ Scope {
         }
     }
 
-    function queueMetrics(source, line) {
-        if (source === "local") {
-            pendingLocalMetricsLine = line;
-            localMetricsPending = true;
-        } else if (source === "remote") {
-            pendingRemoteMetricsLine = line;
-            remoteMetricsPending = true;
-        } else {
-            return;
-        }
-
-        if (localMetricsPending && remoteMetricsPending) {
-            metricsCommitTimer.stop();
-            commitPendingMetrics();
-        } else if (!metricsCommitTimer.running) {
-            metricsCommitTimer.start();
-        }
-    }
-
-    function commitPendingMetrics() {
-        const localLine = pendingLocalMetricsLine;
-        const remoteLine = pendingRemoteMetricsLine;
-        const applyLocal = localMetricsPending;
-        const applyRemote = remoteMetricsPending;
-
-        pendingLocalMetricsLine = "";
-        pendingRemoteMetricsLine = "";
-        localMetricsPending = false;
-        remoteMetricsPending = false;
-
-        if (applyLocal)
-            updateMetrics(localData, localLine);
-        if (applyRemote)
-            updateMetrics(remoteData, remoteLine);
-
-        historyStore.capture(localData, remoteData, Date.now());
-    }
-
     function compactModelName(value) {
         if (typeof value !== "string")
             return "";
@@ -321,16 +250,14 @@ Scope {
         return fields.length > 0 ? fields.join(" · ") : "MODEL --";
     }
 
-    function percentageValue(value, available, precision) {
+    function percentageValue(value, available) {
         return available && typeof value === "number"
-            ? value.toFixed(precision === undefined ? 0 : precision)
-            : "--";
+            ? value.toFixed(0) : "--";
     }
 
-    function metricValue(value, precision) {
+    function metricValue(value) {
         return typeof value === "number"
-            ? value.toFixed(precision === undefined ? 0 : precision)
-            : "--";
+            ? value.toFixed(0) : "--";
     }
 
     function gibibytes(value) {
@@ -455,9 +382,7 @@ Scope {
         property real storageUsed: 0
         property real storageTotal: 0
         property real storageUsage: 0
-        property bool storageKnown: false
         property var storageVolumes: []
-        property bool networkKnown: false
         property bool networkAvailable: false
         property string networkInterface: ""
         property real networkDownload: 0
@@ -467,8 +392,6 @@ Scope {
     }
 
     component HistoryStore: QtObject {
-        id: historyStoreObject
-
         property var localCpuTemperature: []
         property var localGpu1Temperature: []
         property var localGpu1Hotspot: []
@@ -690,9 +613,6 @@ Scope {
             shell.widgetsVisible = false;
         }
 
-        function toggle(): void {
-            shell.widgetsVisible = !shell.widgetsVisible;
-        }
     }
 
     component PanelEdge: Item {
@@ -832,7 +752,7 @@ Scope {
     component ModuleHeader: Item {
         id: moduleHeader
 
-        property MetricsData metrics
+        required property MetricsData metrics
         required property string title
         required property string platform
         required property string detail
@@ -896,7 +816,6 @@ Scope {
 
         required property string label
         required property var samples
-        property int valueSize: 18
 
         implicitHeight: 31
 
@@ -930,7 +849,7 @@ Scope {
                             summaryTemperatureMetric.samples)
                         color: theme.textPrimary
                         font.family: shell.numericFont
-                        font.pixelSize: summaryTemperatureMetric.valueSize
+                        font.pixelSize: 21
                         font.weight: Font.Normal
                     }
 
@@ -952,6 +871,7 @@ Scope {
 
         required property string label
         required property var samples
+        property bool primaryValue: false
 
         implicitHeight: 19
 
@@ -962,10 +882,12 @@ Scope {
                 verticalCenter: parent.verticalCenter
             }
             text: summaryTemperatureRow.label
-            color: theme.textMuted
+            color: summaryTemperatureRow.primaryValue
+                ? theme.textSecondary : theme.textMuted
             font.family: shell.smallLabelFont
-            font.pixelSize: 9
-            font.weight: Font.Medium
+            font.pixelSize: 10
+            font.weight: summaryTemperatureRow.primaryValue
+                ? Font.Medium : Font.Normal
         }
 
         Row {
@@ -981,9 +903,10 @@ Scope {
 
                 text: historyStore.temperaturePeakText(
                     summaryTemperatureRow.samples)
-                color: theme.textPrimary
+                color: summaryTemperatureRow.primaryValue
+                    ? theme.textPrimary : theme.textSecondary
                 font.family: shell.numericFont
-                font.pixelSize: 16
+                font.pixelSize: summaryTemperatureRow.primaryValue ? 19 : 14
                 font.weight: Font.Normal
             }
 
@@ -992,7 +915,7 @@ Scope {
                 text: "°C"
                 color: theme.textMuted
                 font.family: shell.smallLabelFont
-                font.pixelSize: 9
+                font.pixelSize: summaryTemperatureRow.primaryValue ? 10 : 9
                 font.weight: Font.Medium
             }
         }
@@ -1034,24 +957,27 @@ Scope {
                     visible: !summaryDeviceMetric.hotspotVisible
                     label: "TEMP"
                     samples: summaryDeviceMetric.temperatureSamples
-                    valueSize: 21
                 }
 
                 Column {
+                    id: temperaturePair
+
                     anchors.fill: parent
                     visible: summaryDeviceMetric.hotspotVisible
                     spacing: 0
 
                     SummaryTemperatureRow {
                         width: parent.width
-                        height: parent.height / 2
+                        height: Math.round(temperaturePair.height * 0.58)
                         label: "EDGE"
                         samples: summaryDeviceMetric.temperatureSamples
+                        primaryValue: true
                     }
 
                     SummaryTemperatureRow {
                         width: parent.width
-                        height: parent.height / 2
+                        height: temperaturePair.height
+                            - Math.round(temperaturePair.height * 0.58)
                         label: "HOTSPOT"
                         samples: summaryDeviceMetric.hotspotSamples
                     }
@@ -1066,6 +992,7 @@ Scope {
         required property string label
         required property var samples
         property bool peakValue: false
+        property bool primaryValue: false
 
         implicitHeight: 19
 
@@ -1076,10 +1003,12 @@ Scope {
                 verticalCenter: parent.verticalCenter
             }
             text: summaryPowerValue.label
-            color: theme.textMuted
+            color: summaryPowerValue.primaryValue
+                ? theme.textSecondary : theme.textMuted
             font.family: shell.smallLabelFont
             font.pixelSize: 10
-            font.weight: Font.Medium
+            font.weight: summaryPowerValue.primaryValue
+                ? Font.Medium : Font.Normal
         }
 
         Row {
@@ -1097,9 +1026,10 @@ Scope {
                     ? historyStore.powerPeakText(summaryPowerValue.samples)
                     : historyStore.powerAverageText(
                         summaryPowerValue.samples)
-                color: theme.textPrimary
+                color: summaryPowerValue.primaryValue
+                    ? theme.textPrimary : theme.textSecondary
                 font.family: shell.numericFont
-                font.pixelSize: 19
+                font.pixelSize: summaryPowerValue.primaryValue ? 21 : 15
                 font.weight: Font.Normal
             }
 
@@ -1108,7 +1038,7 @@ Scope {
                 text: "W"
                 color: theme.textMuted
                 font.family: shell.smallLabelFont
-                font.pixelSize: 10
+                font.pixelSize: summaryPowerValue.primaryValue ? 10 : 9
                 font.weight: Font.Medium
             }
         }
@@ -1160,20 +1090,24 @@ Scope {
             }
 
             Column {
+                id: powerPair
+
                 width: parent.width
                 height: parent.height - 18
                 spacing: 0
 
                 SummaryPowerValue {
                     width: parent.width
-                    height: parent.height / 2
+                    height: Math.round(powerPair.height * 0.59)
                     label: "AVG"
                     samples: summaryPowerMachine.samples
+                    primaryValue: true
                 }
 
                 SummaryPowerValue {
                     width: parent.width
-                    height: parent.height / 2
+                    height: powerPair.height
+                        - Math.round(powerPair.height * 0.59)
                     label: "MAX"
                     samples: summaryPowerMachine.samples
                     peakValue: true
@@ -1269,6 +1203,7 @@ Scope {
 
             UI.SectionHeader {
                 width: parent.width
+                palette: theme
                 height: performanceSummaryPanel.sectionHeaderHeight
                 label: "PEAK TEMPERATURE"
                 metadata: "10 MIN MAX"
@@ -1413,6 +1348,7 @@ Scope {
 
             UI.SectionHeader {
                 width: parent.width
+                palette: theme
                 height: performanceSummaryPanel.sectionHeaderHeight
                 label: "COMPUTE POWER"
                 metadata: "AVG / MAX"
@@ -1480,6 +1416,7 @@ Scope {
 
         UI.SectionHeader {
             width: parent.width
+            palette: theme
             label: computeSection.label
             metadata: computeSection.modelName !== ""
                 ? shell.compactModelName(computeSection.modelName)
@@ -1494,8 +1431,7 @@ Scope {
                 label: "LOAD"
                 valueText: shell.percentageValue(
                     computeSection.usage,
-                    computeSection.available,
-                    0
+                    computeSection.available
                 )
                 unitText: "%"
             }
@@ -1503,20 +1439,14 @@ Scope {
             MetricCell {
                 width: parent.width / 3
                 label: "TEMP"
-                valueText: shell.metricValue(
-                    computeSection.temperatureValue,
-                    0
-                )
+                valueText: shell.metricValue(computeSection.temperatureValue)
                 unitText: "°C"
             }
 
             MetricCell {
                 width: parent.width / 3
                 label: "POWER"
-                valueText: shell.metricValue(
-                    computeSection.powerValue,
-                    0
-                )
+                valueText: shell.metricValue(computeSection.powerValue)
                 unitText: "W"
             }
         }
@@ -1554,6 +1484,7 @@ Scope {
 
             UI.SectionHeader {
                 width: parent.width
+                palette: theme
                 label: localComputeDevice.label
                 metadata: localComputeDevice.detail !== ""
                     ? localComputeDevice.detail : "MODEL --"
@@ -1569,8 +1500,7 @@ Scope {
                     label: "LOAD"
                     valueText: shell.percentageValue(
                         localComputeDevice.usage,
-                        localComputeDevice.available,
-                        0
+                        localComputeDevice.available
                     )
                     unitText: "%"
                 }
@@ -1579,9 +1509,7 @@ Scope {
                     width: parent.width / 3
                     label: "TEMP"
                     valueText: shell.metricValue(
-                        localComputeDevice.temperatureValue,
-                        0
-                    )
+                        localComputeDevice.temperatureValue)
                     unitText: "°C"
                 }
 
@@ -1589,9 +1517,7 @@ Scope {
                     width: parent.width / 3
                     label: "POWER"
                     valueText: shell.metricValue(
-                        localComputeDevice.powerValue,
-                        0
-                    )
+                        localComputeDevice.powerValue)
                     unitText: "W"
                 }
             }
@@ -1700,8 +1626,7 @@ Scope {
                     id: localMemoryValue
                     text: shell.percentageValue(
                         localMemoryMetric.usage,
-                        localMemoryMetric.available,
-                        0
+                        localMemoryMetric.available
                     )
                     color: localMemoryMetric.available
                         ? theme.textPrimary : theme.textDisabled
@@ -1773,6 +1698,7 @@ Scope {
 
         UI.SectionHeader {
             width: parent.width
+            palette: theme
             label: "MEMORY"
         }
 
@@ -1884,12 +1810,16 @@ Scope {
     component LocalStorageSection: Column {
         id: localStorageSection
 
-        property MetricsData metrics
+        required property MetricsData metrics
+        readonly property int volumeCount:
+            Array.isArray(metrics.storageVolumes)
+                ? metrics.storageVolumes.length : 0
 
         spacing: 3
 
         UI.SectionHeader {
             width: parent.width
+            palette: theme
             label: "STORAGE"
         }
 
@@ -1899,30 +1829,31 @@ Scope {
             available: localStorageSection.metrics.storageAvailable
             used: localStorageSection.metrics.storageUsed
             total: localStorageSection.metrics.storageTotal
-            unavailableText: localStorageSection.metrics.storageKnown
-                ? "SENSOR --" : "-- / -- GiB"
+            unavailableText: "SENSOR --"
             usage: localStorageSection.metrics.storageUsage
             accent: theme.storageAccent
         }
 
         Repeater {
-            model: localStorageSection.metrics.storageVolumes
+            model: localStorageSection.volumeCount
 
             delegate: LocalCapacityRow {
-                required property var modelData
+                required property int index
+                readonly property var volume:
+                    localStorageSection.metrics.storageVolumes[index]
 
                 width: localStorageSection.width
-                label: modelData.label
-                    + (modelData.kind !== ""
-                            && modelData.kind.toUpperCase()
-                                !== modelData.label.toUpperCase()
-                        ? " · " + modelData.kind.toUpperCase()
+                label: volume.label
+                    + (volume.kind !== ""
+                            && volume.kind.toUpperCase()
+                                !== volume.label.toUpperCase()
+                        ? " · " + volume.kind.toUpperCase()
                         : "")
-                available: modelData.available
-                used: modelData.used
-                total: modelData.total
+                available: volume.available
+                used: volume.used
+                total: volume.total
                 unavailableText: "NOT MOUNTED"
-                usage: modelData.usage
+                usage: volume.usage
                 accent: theme.storageAccent
             }
         }
@@ -1937,6 +1868,7 @@ Scope {
 
         UI.SectionHeader {
             width: parent.width
+            palette: theme
             label: "NETWORK"
             metadata: networkSection.metrics.networkInterface !== ""
                 ? networkSection.metrics.networkInterface
@@ -2014,8 +1946,7 @@ Scope {
                     id: memoryPercent
                     text: shell.percentageValue(
                         memoryPair.usage,
-                        memoryPair.available,
-                        0
+                        memoryPair.available
                     )
                     color: theme.textPrimary
                     font.family: shell.numericFont
@@ -2037,10 +1968,11 @@ Scope {
                     left: parent.left
                     bottom: parent.bottom
                 }
-                text: memoryPair.available
-                    ? shell.gibibytes(memoryPair.used) + " / "
-                        + shell.gibibytes(memoryPair.total) + " GiB"
-                    : "-- / -- GiB"
+                text: shell.capacitySummary(
+                    memoryPair.used,
+                    memoryPair.total,
+                    memoryPair.available
+                )
                 color: theme.textSecondary
                 font.family: shell.smallLabelFont
                 font.pixelSize: 9
@@ -2066,6 +1998,7 @@ Scope {
 
         UI.SectionHeader {
             width: parent.width
+            palette: theme
             label: "MEMORY"
             metadata: "RAM · VRAM"
         }
@@ -2348,7 +2281,7 @@ Scope {
 
         stdout: SplitParser {
             splitMarker: "\n"
-            onRead: line => shell.queueMetrics("local", line)
+            onRead: line => shell.updateMetrics(localData, line)
         }
     }
 
@@ -2372,15 +2305,16 @@ Scope {
 
         stdout: SplitParser {
             splitMarker: "\n"
-            onRead: line => shell.queueMetrics("remote", line)
+            onRead: line => shell.updateMetrics(remoteData, line)
         }
     }
 
     Timer {
-        id: metricsCommitTimer
-        interval: shell.metricsCommitFallbackMs
-        repeat: false
-        onTriggered: shell.commitPendingMetrics()
+        interval: shell.historySampleIntervalMs
+        running: true
+        repeat: true
+        onTriggered: historyStore.capture(
+            localData, remoteData, Date.now())
     }
 
     Timer {

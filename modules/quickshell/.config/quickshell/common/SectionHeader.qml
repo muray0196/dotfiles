@@ -3,31 +3,24 @@ import QtQuick
 Item {
     id: sectionHeader
 
+    required property QtObject palette
     required property string label
     property string metadata: ""
     property bool metadataVisible: metadata !== ""
-    property color labelTone: sharedTheme.textPrimary
-    property color metadataTone: sharedTheme.textMuted
-    property int metadataSize: sharedTheme.observationMetadataSize
+    property color metadataTone: palette.textMuted
     property bool statusActive: false
     property string statusLabel: ""
-    property color statusTone: sharedTheme.statusUnknown
+    property color statusTone: palette.statusUnknown
 
     implicitHeight: 19
 
-    Theme {
-        id: sharedTheme
-    }
-
     Text {
-        id: sectionLabel
-
         anchors {
             left: parent.left
             verticalCenter: parent.verticalCenter
         }
         text: sectionHeader.label
-        color: sectionHeader.labelTone
+        color: sectionHeader.palette.textPrimary
         font.family: "Adwaita Mono"
         font.pixelSize: 14
         font.weight: Font.Medium
@@ -43,7 +36,7 @@ Item {
         text: sectionHeader.metadata
         color: sectionHeader.metadataTone
         font.family: "Adwaita Mono"
-        font.pixelSize: sectionHeader.metadataSize
+        font.pixelSize: sectionHeader.palette.observationMetadataSize
         font.weight: Font.Medium
     }
 

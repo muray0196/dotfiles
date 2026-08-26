@@ -132,8 +132,10 @@ the files needed for this machine from the adjacent `*.example.json` templates:
 ```
 
 Keep those files mode `0600`. A missing or disabled `machine.json` leaves desktop
-automation off, while the performance widget can continue without it. The
-current visual direction and experiment boundaries are recorded in
+automation off, while the performance widget can continue without it. Each
+loader requires the complete current fields for the section it consumes; partial
+legacy config shapes are not accepted. The current visual direction and experiment
+boundaries are recorded in
 [`docs/quickshell-ui-plan.md`](docs/quickshell-ui-plan.md).
 
 Additional setup for GitHub authentication, Docker, SearXNG, and similar tools must be run explicitly from `scripts/`.

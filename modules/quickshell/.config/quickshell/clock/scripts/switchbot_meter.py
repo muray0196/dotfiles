@@ -20,6 +20,8 @@ SWITCHBOT_COMPANY_ID = 0x0969
 OUTDOOR_METER_MODEL_BYTES = {ord("w"), ord("W")}
 # A USB controller reset can leave BlueZ's scan object alive but inert.
 CONTINUOUS_SCAN_IDLE_TIMEOUT = 30.0
+# Keep a recent sample ready for Quickshell's 30-second display cadence.
+SCAN_PAUSE_AFTER_READING = 20.0
 SCAN_RETRY_DELAY = 2.0
 
 
@@ -79,12 +81,17 @@ async def scan(address: str | None, once: bool, timeout: float) -> int:
         reading_received.set()
 
     def on_advertisement(device: Any, advertisement: Any) -> None:
+        if not once and reading_received.is_set():
+            return
+
         reading = decode_advertisement(device, advertisement)
         if not reading or (
             expected_address and reading["address"] != expected_address
         ):
             return
 
+        if not once:
+            del reading["address"]
         print(json.dumps(reading, ensure_ascii=False), flush=True)
         reading_received.set()
         if once:
@@ -111,21 +118,27 @@ async def scan(address: str | None, once: bool, timeout: float) -> int:
         reading_received.clear()
         try:
             async with BleakScanner(on_advertisement):
-                while not finished.is_set():
-                    try:
-                        await asyncio.wait_for(
-                            reading_received.wait(),
-                            CONTINUOUS_SCAN_IDLE_TIMEOUT,
-                        )
-                    except TimeoutError:
-                        break
-                    reading_received.clear()
+                try:
+                    await asyncio.wait_for(
+                        reading_received.wait(),
+                        CONTINUOUS_SCAN_IDLE_TIMEOUT,
+                    )
+                except TimeoutError:
+                    pass
         except Exception as error:
             if not finished.is_set():
                 print(f"Bluetooth scan failed: {error}; retrying", file=sys.stderr)
 
         if not finished.is_set():
-            await asyncio.sleep(SCAN_RETRY_DELAY)
+            delay = (
+                SCAN_PAUSE_AFTER_READING
+                if reading_received.is_set()
+                else SCAN_RETRY_DELAY
+            )
+            try:
+                await asyncio.wait_for(finished.wait(), delay)
+            except TimeoutError:
+                pass
 
     return 0
 
@@ -142,6 +155,8 @@ def main() -> int:
         help="seconds to wait with --once (default: 30)",
     )
     args = parser.parse_args()
+    if args.timeout <= 0:
+        parser.error("--timeout must be greater than zero")
     try:
         address = (
             args.address

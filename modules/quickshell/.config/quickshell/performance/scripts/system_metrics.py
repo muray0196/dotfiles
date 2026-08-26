@@ -23,15 +23,26 @@ PCI_IDS = Path("/usr/share/hwdata/pci.ids")
 PROC_NET_ROUTE = Path("/proc/net/route")
 PROC_NET_DEV = Path("/proc/net/dev")
 PROC_UPTIME = Path("/proc/uptime")
+HARDWARE_DISCOVERY_INTERVAL_SECONDS = 60.0
 
 
 @dataclass(frozen=True)
 class AmdGpuDevice:
     id: str
     device: Path
-    hwmon: Path | None
     display_connected: bool
     model: str | None
+    temperature_input: Path | None
+    hotspot_temperature_input: Path | None
+    power_input: Path | None
+
+
+@dataclass(frozen=True)
+class LocalHardware:
+    cpu_model: str | None
+    cpu_temperature_input: Path | None
+    gpu_devices: tuple[AmdGpuDevice, ...]
+    rapl_max_energy: int | None
 
 
 def read_text(path: Path) -> str | None:
@@ -41,7 +52,9 @@ def read_text(path: Path) -> str | None:
         return None
 
 
-def read_int(path: Path) -> int | None:
+def read_int(path: Path | None) -> int | None:
+    if path is None:
+        return None
     value = read_text(path)
     if value is None:
         return None
@@ -86,9 +99,17 @@ def find_amdgpu_devices() -> tuple[AmdGpuDevice, ...]:
             AmdGpuDevice(
                 id=device.name,
                 device=device,
-                hwmon=hwmon,
                 display_connected=display_connected,
                 model=read_pci_model(device),
+                temperature_input=find_labeled_input_path(
+                    hwmon, "temp", "edge"
+                ),
+                hotspot_temperature_input=find_labeled_input_path(
+                    hwmon, "temp", "junction"
+                ),
+                power_input=find_labeled_input_path(
+                    hwmon, "power", "PPT", "average"
+                ),
             )
         )
 
@@ -138,12 +159,12 @@ def read_pci_model(device: Path | None) -> str | None:
     return None
 
 
-def find_labeled_input(
+def find_labeled_input_path(
     hwmon: Path | None,
     prefix: str,
     wanted_label: str,
     value_suffix: str = "input",
-) -> int | None:
+) -> Path | None:
     if hwmon is None:
         return None
     for label_path in sorted(hwmon.glob(f"{prefix}*_label")):
@@ -152,18 +173,31 @@ def find_labeled_input(
         input_path = label_path.with_name(
             label_path.name.removesuffix("_label") + f"_{value_suffix}"
         )
-        return read_int(input_path)
+        return input_path
     return None
+
+
+def discover_hardware() -> LocalHardware:
+    cpu_hwmon = find_hwmon("coretemp")
+    return LocalHardware(
+        cpu_model=read_cpu_model(),
+        cpu_temperature_input=find_labeled_input_path(
+            cpu_hwmon, "temp", "Package id 0"
+        ),
+        gpu_devices=find_amdgpu_devices(),
+        rapl_max_energy=read_int(RAPL_ROOT / "max_energy_range_uj"),
+    )
 
 
 def read_cpu_times() -> tuple[int, int]:
     with Path("/proc/stat").open(encoding="utf-8") as stat_file:
         fields = stat_file.readline().split()
-    if not fields or fields[0] != "cpu" or len(fields) < 6:
+    if not fields or fields[0] != "cpu" or len(fields) < 9:
         raise ValueError("aggregate CPU counters were not found")
 
     counters = [int(value) for value in fields[1:]]
-    total = sum(counters)
+    # guest and guest_nice are already included in user and nice.
+    total = sum(counters[:8])
     idle = counters[3] + counters[4]
     return total, idle
 
@@ -345,15 +379,11 @@ def read_gpu(gpu: AmdGpuDevice) -> dict[str, Any]:
         "runtime_status": read_text(gpu.device / "power/runtime_status"),
         "model": gpu.model,
         "usage_percent": float(gpu_usage) if gpu_usage is not None else None,
-        "temperature_c": temperature_c(
-            find_labeled_input(gpu.hwmon, "temp", "edge")
-        ),
+        "temperature_c": temperature_c(read_int(gpu.temperature_input)),
         "hotspot_temperature_c": temperature_c(
-            find_labeled_input(gpu.hwmon, "temp", "junction")
+            read_int(gpu.hotspot_temperature_input)
         ),
-        "power_w": power_w(
-            find_labeled_input(gpu.hwmon, "power", "PPT", "average")
-        ),
+        "power_w": power_w(read_int(gpu.power_input)),
         "vram": {
             "used_bytes": vram_used,
             "total_bytes": vram_total,
@@ -367,8 +397,7 @@ def read_snapshot(
     previous_energy: int | None,
     previous_network: tuple[str, int, int] | None,
     previous_time: float,
-    cpu_hwmon: Path | None,
-    gpu_devices: tuple[AmdGpuDevice, ...],
+    hardware: LocalHardware,
     local_storage: tuple[LocalStorageConfig, ...],
 ) -> tuple[
     dict[str, Any],
@@ -381,7 +410,6 @@ def read_snapshot(
     current_cpu = read_cpu_times()
     current_energy = read_int(RAPL_ROOT / "energy_uj")
     current_network = read_network_counters()
-    max_energy = read_int(RAPL_ROOT / "max_energy_range_uj")
     elapsed = now - previous_time
     download_rate, upload_rate = network_rates(
         previous_network, current_network, elapsed
@@ -396,52 +424,29 @@ def read_snapshot(
         if memory_total is not None and memory_available is not None
         else None
     )
-    gpus = [read_gpu(gpu) for gpu in gpu_devices]
-    primary_gpu = gpus[0] if gpus else None
+    gpus = [read_gpu(gpu) for gpu in hardware.gpu_devices]
 
     reading: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "host": "local",
-        "timestamp": int(time.time()),
         "cpu": {
-            "model": read_cpu_model(),
+            "model": hardware.cpu_model,
             "usage_percent": usage_percent(previous_cpu, current_cpu),
             "temperature_c": temperature_c(
-                find_labeled_input(cpu_hwmon, "temp", "Package id 0")
+                read_int(hardware.cpu_temperature_input)
             ),
             "power_w": rapl_power_w(
                 previous_energy,
                 current_energy,
                 elapsed,
-                max_energy,
+                hardware.rapl_max_energy,
             ),
-        },
-        "gpu": {
-            "model": primary_gpu["model"] if primary_gpu else None,
-            "usage_percent": (
-                primary_gpu["usage_percent"] if primary_gpu else None
-            ),
-            "temperature_c": (
-                primary_gpu["temperature_c"] if primary_gpu else None
-            ),
-            "power_w": primary_gpu["power_w"] if primary_gpu else None,
         },
         "gpus": gpus,
         "memory": {
             "used_bytes": memory_used,
             "total_bytes": memory_total,
             "usage_percent": bytes_usage(memory_used, memory_total),
-        },
-        "vram": {
-            "used_bytes": (
-                primary_gpu["vram"]["used_bytes"] if primary_gpu else None
-            ),
-            "total_bytes": (
-                primary_gpu["vram"]["total_bytes"] if primary_gpu else None
-            ),
-            "usage_percent": (
-                primary_gpu["vram"]["usage_percent"] if primary_gpu else None
-            ),
         },
         "storage": {
             "used_bytes": storage_used,
@@ -464,8 +469,7 @@ def stream(interval: float, once: bool, machine_config: Path) -> int:
         print("interval must be greater than zero", file=sys.stderr)
         return 2
 
-    cpu_hwmon = find_hwmon("coretemp")
-    gpu_devices = find_amdgpu_devices()
+    hardware = discover_hardware()
     try:
         local_storage = load_local_storage(machine_config)
     except FileNotFoundError:
@@ -491,6 +495,9 @@ def stream(interval: float, once: bool, machine_config: Path) -> int:
     previous_energy = read_int(RAPL_ROOT / "energy_uj")
     previous_network = read_network_counters()
     previous_time = time.monotonic()
+    hardware_refresh_at = (
+        previous_time + HARDWARE_DISCOVERY_INTERVAL_SECONDS
+    )
     finished = False
 
     def stop(*_: object) -> None:
@@ -508,6 +515,11 @@ def stream(interval: float, once: bool, machine_config: Path) -> int:
         if finished:
             break
         next_sample += interval
+        if time.monotonic() >= hardware_refresh_at:
+            hardware = discover_hardware()
+            hardware_refresh_at = (
+                time.monotonic() + HARDWARE_DISCOVERY_INTERVAL_SECONDS
+            )
         try:
             (
                 reading,
@@ -520,12 +532,13 @@ def stream(interval: float, once: bool, machine_config: Path) -> int:
                 previous_energy,
                 previous_network,
                 previous_time,
-                cpu_hwmon,
-                gpu_devices,
+                hardware,
                 local_storage,
             )
         except (OSError, ValueError) as error:
             print(f"system metrics failed: {error}", file=sys.stderr, flush=True)
+            if once:
+                return 1
         else:
             print(json.dumps(reading, separators=(",", ":")), flush=True)
             if once:

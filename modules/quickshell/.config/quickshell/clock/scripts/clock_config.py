@@ -36,7 +36,7 @@ def _required_number(data: dict[str, object], field: str) -> float:
     return float(value)
 
 
-def load_clock_config(path: Path = DEFAULT_CONFIG) -> ClockConfig:
+def load_clock_config(path: Path) -> ClockConfig:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("clock config must be a JSON object")

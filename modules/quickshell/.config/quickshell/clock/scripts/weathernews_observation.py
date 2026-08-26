@@ -24,16 +24,16 @@ RETRY_DELAYS = (10, 30)
 RETRYABLE_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
 
 HOURLY_WEATHER = {
-    100: ("sunny", "晴れ"),
-    200: ("cloudy", "くもり"),
-    300: ("rain", "雨"),
-    400: ("snow", "雪"),
-    430: ("sleet", "みぞれ"),
-    550: ("extreme_heat", "猛暑"),
-    600: ("sunny", "晴れ"),
-    650: ("light_rain", "小雨"),
-    850: ("storm", "大雨・嵐"),
-    950: ("blizzard", "大雪・吹雪"),
+    100: "sunny",
+    200: "cloudy",
+    300: "rain",
+    400: "snow",
+    430: "sleet",
+    550: "extreme_heat",
+    600: "sunny",
+    650: "light_rain",
+    850: "storm",
+    950: "blizzard",
 }
 PRECIPITATION_STATES = {
     "light_rain",
@@ -201,8 +201,8 @@ def observation_state(condition: str) -> str:
     return "unknown"
 
 
-def forecast_weather(weather_code: int) -> tuple[str, str]:
-    return HOURLY_WEATHER.get(weather_code, ("unknown", ""))
+def forecast_weather(weather_code: int) -> str:
+    return HOURLY_WEATHER.get(weather_code, "unknown")
 
 
 def parse_forecast_item(
@@ -254,13 +254,11 @@ def parse_forecast_item(
         microsecond=0,
     )
     weather_code = int(code_match.group(1))
-    state, condition = forecast_weather(weather_code)
+    state = forecast_weather(weather_code)
     return {
         "at": forecast_at.isoformat(timespec="minutes"),
         "hour": f"{hour:02d}",
-        "weather_code": weather_code,
         "state": state,
-        "condition": condition,
         "temperature": temperature,
         "precipitation": precipitation,
     }
@@ -397,7 +395,7 @@ def build_rain_outlook(
     )
 
 
-def parse_observation(html: str, source_url: str = "") -> dict[str, Any]:
+def parse_observation(html: str) -> dict[str, Any]:
     reference = datetime.now().astimezone()
     parser = WeatherPageParser()
     parser.feed(html)
@@ -449,16 +447,23 @@ def parse_observation(html: str, source_url: str = "") -> dict[str, Any]:
         parser.roots.get("flick_list_1hour"), reference
     )
     condition = condition_element.text()
+    display_forecasts = [
+        {
+            "hour": forecast["hour"],
+            "state": forecast["state"],
+            "temperature": forecast["temperature"],
+            "precipitation": forecast["precipitation"],
+        }
+        for forecast in forecasts[:5]
+    ]
     return {
         "observed_at": time_match.group(1),
         "state": observation_state(condition),
         "condition": condition,
         "temperature": temperature,
         "humidity": int(humidity),
-        "hourly_forecast": forecasts[:5],
+        "hourly_forecast": display_forecasts,
         "rain_outlook": build_rain_outlook(forecasts, reference),
-        "source": "Weathernews",
-        "source_url": source_url,
     }
 
 
@@ -521,17 +526,16 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        source_url = (
-            args.url
-            if args.url is not None
-            else load_clock_config(args.config).weathernews_url
-        )
-        html = (
-            args.file.read_text(encoding="utf-8")
-            if args.file is not None
-            else fetch_html(source_url, args.timeout)
-        )
-        observation = parse_observation(html, source_url)
+        if args.file is not None:
+            html = args.file.read_text(encoding="utf-8")
+        else:
+            source_url = (
+                args.url
+                if args.url is not None
+                else load_clock_config(args.config).weathernews_url
+            )
+            html = fetch_html(source_url, args.timeout)
+        observation = parse_observation(html)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
         print(f"Weathernews fetch failed: {error}", file=sys.stderr)
         return 1

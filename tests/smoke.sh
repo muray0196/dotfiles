@@ -45,6 +45,12 @@ for python_path in sorted((root / "services/search-stack/hermes-plugin").rglob("
     compile(python_path.read_text(encoding="utf-8"), str(python_path), "exec")
     print("ok ", python_path.relative_to(root))
 
+for python_path in sorted(
+    (root / "modules/quickshell/.config/quickshell").glob("*/scripts/*.py")
+):
+    compile(python_path.read_text(encoding="utf-8"), str(python_path), "exec")
+    print("ok ", python_path.relative_to(root))
+
 
 def definition_lines(path: Path) -> list[str]:
     lines: list[str] = []

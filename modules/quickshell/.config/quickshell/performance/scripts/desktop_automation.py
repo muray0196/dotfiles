@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from machine_config import DISABLED_MACHINE_CONFIG, MachineConfig
+from machine_config import MachineConfig
 
 
 OFFLINE_AFTER_SECONDS = 10.0
@@ -31,11 +31,13 @@ DPMS_OFF_DISPATCH = 'hl.dsp.dpms("off")'
 DPMS_ON_DISPATCH = 'hl.dsp.dpms("on")'
 DDCUTIL = "/usr/bin/ddcutil"
 DISPLAY_STATE_POLL_SECONDS = 1.0
+SETTINGS_CHECK_INTERVAL_SECONDS = 1.0
 DISPLAY_ON_RETRY_SECONDS = 5.0
 PHYSICAL_POWER_POLL_SECONDS = 10.0
 PHYSICAL_POWER_PROBE_TIMEOUT_SECONDS = 2.0
 PHYSICAL_POWER_FAILURE_THRESHOLD = 3
 HYPRLAND_SOCKET_TIMEOUT = 0.5
+DESKTOP_COMMAND_TIMEOUT_SECONDS = 5.0
 
 CommandRunner = Callable[[Sequence[str]], bool]
 DisplayPowerReader = Callable[[], bool]
@@ -60,9 +62,6 @@ class DisplaySchedule:
             raise ValueError("display off and on hours must differ")
 
 
-DEFAULT_DISPLAY_SCHEDULE = DisplaySchedule(off_hour=0, on_hour=7)
-
-
 @dataclass(frozen=True)
 class AutomationSettings:
     display_schedule: DisplaySchedule
@@ -73,19 +72,9 @@ class AutomationSettings:
             raise ValueError("Waywallen linkage setting must be a boolean")
 
 
-DEFAULT_AUTOMATION_SETTINGS = AutomationSettings(
-    display_schedule=DEFAULT_DISPLAY_SCHEDULE,
-    waywallen_link_enabled=True,
-)
-
-
-def load_automation_settings(path: Path = DEFAULT_SETTINGS) -> AutomationSettings:
-    """Read desktop settings, falling back to the original behavior."""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return DEFAULT_AUTOMATION_SETTINGS
-
+def load_automation_settings(path: Path) -> AutomationSettings:
+    """Read and validate the complete desktop settings file."""
+    data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("desktop automation settings must be a JSON object")
     return AutomationSettings(
@@ -93,12 +82,8 @@ def load_automation_settings(path: Path = DEFAULT_SETTINGS) -> AutomationSetting
             off_hour=data.get("display_off_hour"),
             on_hour=data.get("display_on_hour"),
         ),
-        waywallen_link_enabled=data.get("waywallen_link_enabled", True),
+        waywallen_link_enabled=data.get("waywallen_link_enabled"),
     )
-
-
-def load_display_schedule(path: Path = DEFAULT_SETTINGS) -> DisplaySchedule:
-    return load_automation_settings(path).display_schedule
 
 
 @dataclass(frozen=True)
@@ -297,7 +282,17 @@ def run_command(command: Sequence[str]) -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
+            timeout=DESKTOP_COMMAND_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired:
+        print(
+            "desktop automation command failed: "
+            f"{command[0]}: timed out after "
+            f"{DESKTOP_COMMAND_TIMEOUT_SECONDS:g}s",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
     except OSError as error:
         print(
             f"desktop automation command failed: {command[0]}: {error}",
@@ -317,9 +312,7 @@ def run_command(command: Sequence[str]) -> bool:
     return True
 
 
-def is_display_off_window(
-    moment: datetime, schedule: DisplaySchedule = DEFAULT_DISPLAY_SCHEDULE
-) -> bool:
+def is_display_off_window(moment: datetime, schedule: DisplaySchedule) -> bool:
     if schedule.off_hour < schedule.on_hour:
         return schedule.off_hour <= moment.hour < schedule.on_hour
     return moment.hour >= schedule.off_hour or moment.hour < schedule.on_hour
@@ -332,6 +325,7 @@ class DesktopAutomation:
         self,
         offline_after: float = OFFLINE_AFTER_SECONDS,
         *,
+        machine_config: MachineConfig,
         settings_path: Path = DEFAULT_SETTINGS,
         runtime_state_path: Path = DEFAULT_RUNTIME_STATE,
         boot_id: str | None = None,
@@ -340,11 +334,12 @@ class DesktopAutomation:
         command_runner: CommandRunner = run_command,
         display_power_reader: DisplayPowerReader = read_display_power_off,
         ddc_power_probe_starter: DdcPowerProbeStarter = start_ddc_power_probe,
-        machine_config: MachineConfig = DISABLED_MACHINE_CONFIG,
     ) -> None:
         if offline_after <= 0:
             raise ValueError("offline timeout must be greater than zero")
 
+        settings = load_automation_settings(settings_path)
+        settings_stat = settings_path.stat()
         self.offline_after = offline_after
         self.settings_path = settings_path
         self.runtime_state_path = runtime_state_path
@@ -359,13 +354,18 @@ class DesktopAutomation:
         self._last_heartbeat: float | None = None
         self._main_pc_online: bool | None = None
         self._off_window: bool | None = None
-        self._display_schedule = DEFAULT_DISPLAY_SCHEDULE
-        self._waywallen_link_enabled = True
+        self._display_schedule = settings.display_schedule
+        self._waywallen_link_enabled = settings.waywallen_link_enabled
         self._waywallen_applied: bool | None = None
         self._widgets_applied: bool | None = None
         self._brightness_applied: int | None = None
         self._brightness_retry_at = 0.0
         self._settings_error: str | None = None
+        self._settings_signature = (
+            settings_stat.st_mtime_ns,
+            settings_stat.st_size,
+        )
+        self._settings_check_at = 0.0
         self._runtime_error: str | None = None
         self._display_state_error: str | None = None
         self._display_state_poll_at = 0.0
@@ -732,7 +732,18 @@ class DesktopAutomation:
             self._widgets_applied = desired
 
     def _refresh_automation_settings(self) -> None:
+        current = self._monotonic()
+        if current < self._settings_check_at:
+            return
+        self._settings_check_at = current + SETTINGS_CHECK_INTERVAL_SECONDS
         try:
+            settings_stat = self.settings_path.stat()
+            signature = (
+                settings_stat.st_mtime_ns,
+                settings_stat.st_size,
+            )
+            if signature == self._settings_signature:
+                return
             settings = load_automation_settings(self.settings_path)
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
             detail = str(error)
@@ -746,6 +757,7 @@ class DesktopAutomation:
             return
 
         self._settings_error = None
+        self._settings_signature = signature
         self._display_schedule = settings.display_schedule
         if self._waywallen_link_enabled != settings.waywallen_link_enabled:
             self._waywallen_link_enabled = settings.waywallen_link_enabled
