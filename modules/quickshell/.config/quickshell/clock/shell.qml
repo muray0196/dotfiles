@@ -2296,7 +2296,8 @@ Scope {
                                     height: radarTimelineSegments.height
 
                                     readonly property bool active:
-                                        shell.radarDisplayedFrame !== null
+                                        shell.radarActiveFrames.length > 1
+                                            && shell.radarDisplayedFrame !== null
                                             && shell.radarDisplayedFrame
                                                 .offsetMinutes === modelData
 
