@@ -17,18 +17,15 @@ Usage: dotfiles COMMAND [options]
 
 Commands:
   apply [PROFILE] [options]  Apply a profile or start the guided installer
-  update [options]         Pull, reconcile, update packages/plugins, and validate
-  cleanup [options]        Remove stale links and clean selected package artifacts
-  doctor [options]         Validate the saved selection
-  status                   Show the repository and saved selection
-  uninstall [--dry-run]    Remove managed links while preserving packages and backups
-  help                     Show this help
+  sync [options]             Pull, reconcile, update packages/plugins, and validate
+  doctor [options]           Validate the saved selection
+  status                     Show the repository and saved selection
+  uninstall [--dry-run]      Remove managed links while preserving packages and backups
+  help                       Show this help
 
-Update options:
+Sync options:
   --dry-run                Show operations without applying them
   --no-pull                Skip git pull
-
-Run "dotfiles cleanup --help" for cleanup-specific options.
 USAGE
 }
 
@@ -38,7 +35,7 @@ saved_selection_args() {
     die "No saved installation selection. Run 'dotfiles apply PROFILE' first."
 }
 
-update_configuration() {
+sync_configuration() {
   local dry_run=0
   local pull=1
 
@@ -56,7 +53,7 @@ update_configuration() {
         usage
         return 0
         ;;
-      *) die "Unknown update option: $1" ;;
+      *) die "Unknown sync option: $1" ;;
     esac
   done
 
@@ -77,14 +74,14 @@ update_configuration() {
   fi
 
   local install_args=("${selection_args[@]}")
-  local update_args=("${selection_args[@]}")
+  local sync_args=("${selection_args[@]}")
   if [[ "$dry_run" == "1" ]]; then
     install_args+=(--dry-run --plan)
-    update_args+=(--dry-run)
+    sync_args+=(--dry-run)
   fi
 
   "$DOTFILES_ROOT/install.sh" "${install_args[@]}"
-  "$DOTFILES_ROOT/update.sh" "${update_args[@]}"
+  "$DOTFILES_ROOT/sync.sh" "${sync_args[@]}"
 
   if [[ "$dry_run" == "1" ]]; then
     print_command "$DOTFILES_ROOT/doctor.sh" "${selection_args[@]}"
@@ -155,8 +152,7 @@ case "$command_name" in
       "$DOTFILES_ROOT/install.sh" --profile "$profile" "$@"
     fi
     ;;
-  update) update_configuration "$@" ;;
-  cleanup) "$DOTFILES_ROOT/cleanup.sh" "$@" ;;
+  sync) sync_configuration "$@" ;;
   doctor) "$DOTFILES_ROOT/doctor.sh" "$@" ;;
   status) show_status "$@" ;;
   uninstall) uninstall_configuration "$@" ;;

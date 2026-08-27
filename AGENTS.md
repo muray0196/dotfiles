@@ -26,7 +26,7 @@ This file defines the operating rules for maintainers and coding agents working 
 - `packages/native/`: Manage OS-level packages separately for Ubuntu and Arch Linux.
 - `packages/brew/`: Manage user-facing CLI tools in module-specific Brewfiles.
 - `modules/`: Store feature-oriented GNU Stow packages relative to the home directory.
-- `lib/`: Store shared implementation used by install, update, cleanup, and doctor commands.
+- `lib/`: Store shared implementation used by install, sync, and doctor commands.
 - `scripts/`: Store authentication, service installation, and other explicitly invoked tasks.
 - `services/`: Store optional service configuration and templates.
 - `tests/`: Validate configuration consistency, dry-runs, links, and backups.
@@ -51,18 +51,16 @@ This file defines the operating rules for maintainers and coding agents working 
 - Preserve a saved profile when an individual module is installed later; merge the additional module and managed paths into the existing state.
 - When a full profile is reapplied, remove stale paths only if they are symlinks that still point inside this repository's `modules/` tree.
 - Never remove a regular file, directory, or symlink with a non-repository target during state reconciliation.
-- Keep `dotfiles update` limited to a clean worktree, `git pull --ff-only`, profile reconciliation, selected Homebrew and Sheldon updates, and validation.
-- Keep `dotfiles cleanup` limited by default to stale managed links and old versions of selected Homebrew formulae.
-- Require explicit options for native package cache cleanup and backup pruning.
-- Keep uninstall separate from cleanup. Uninstall removes managed links and installation state but preserves packages and backups.
+- Keep `dotfiles sync` limited to a clean worktree, `git pull --ff-only`, profile reconciliation, selected Homebrew and Sheldon updates, and validation.
+- Uninstall removes managed links and installation state but preserves packages and backups.
 
 ## Package and side-effect boundaries
 
 - Manage Zsh, Git, Stow, tmux, and native dependencies with `apt` or `pacman`.
 - Manage Starship, Sheldon, Neovim, and additional user-facing CLI tools with Linuxbrew.
 - Manage Node.js with mise and keep its global version declaration in the development Stow module.
-- Keep `update.sh` limited to selected Homebrew packages, mise runtimes, and Sheldon plugins. Do not add `apt upgrade` or `pacman -Syu`.
-- Never run `apt autoremove` or automatic pacman orphan removal from cleanup.
+- Keep `sync.sh` limited to selected Homebrew packages, mise runtimes, and Sheldon plugins. Do not add `apt upgrade` or `pacman -Syu`.
+- Never automate `apt autoremove` or pacman orphan removal.
 - Do not mix system-wide upgrades, GitHub authentication, SSH key creation or registration, Docker installation, or systemd service activation into standard profile installation.
 - Isolate tasks with additional side effects under `scripts/` and require users to invoke them explicitly.
 - Never delete conflicting files or legacy dotfiles symlinks. Preserve them under `~/.local/state/dotfiles-linux/backups/`.
@@ -74,7 +72,7 @@ This file defines the operating rules for maintainers and coding agents working 
 - Review resolved operations with `./install.sh --profile <name> --dry-run --plan` before applying them to a real environment.
 - Never run install or unstow against the real home directory while validating repository changes. Use dry-run mode or a temporary `HOME`.
 - Run `./tests/smoke.sh` after making changes.
-- At minimum, keep smoke coverage for shell syntax, TOML/JSON/Python syntax, profile-manifest-package-module-action references, all profile resolutions, Ubuntu/Arch/WSL dry-runs, saved state, profile reconciliation, cleanup previews, and unified CLI uninstall.
+- At minimum, keep smoke coverage for shell syntax, TOML/JSON/Python syntax, profile-manifest-package-module-action references, all profile resolutions, Ubuntu/Arch/WSL dry-runs, saved state, profile reconciliation, and unified CLI uninstall.
 - Resolve ShellCheck findings when changing shell scripts.
 - Follow `.editorconfig`: UTF-8, LF, a final newline, two-space indentation by default, and four-space indentation for Python. Follow `stylua.toml` for Lua.
 - If a test cannot be run, report the skipped test and the reason.

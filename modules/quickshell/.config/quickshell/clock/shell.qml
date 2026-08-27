@@ -656,8 +656,6 @@ Scope {
         ? radarDisplayedFrame.metersPerPixel : 1
     readonly property string radarFrameAt: radarDisplayedFrame !== null
         ? radarDisplayedFrame.frameAt : ""
-    readonly property bool radarFrameForecast: radarDisplayedFrame !== null
-        ? radarDisplayedFrame.forecast : false
     property bool radarAvailable: false
     property bool radarFetchFailed: false
     property bool radarRetrying: false
@@ -689,9 +687,6 @@ Scope {
         ? "VIEW " + radarViewWidthKm + "×"
             + radarViewHeightKm + " KM"
         : "VIEW --"
-    readonly property string radarPlaybackMode: radarAvailable
-            && radarActiveFrames.length > 1
-        ? "LOOP 1.6S" : "STATIC"
     readonly property color radarSourceTone: !radarAvailable
         ? (radarFetchFailed ? theme.statusError : theme.statusUnknown)
         : radarFetchFailed || radarRetrying
@@ -957,17 +952,28 @@ Scope {
     function radarFrameLabel() {
         if (!radarAvailable || radarDisplayedFrame === null)
             return "";
-        return (radarFrameForecast ? "FCST" : "OBS") + " "
-            + radarFrameAt + " · " + (radarFrameIndex + 1) + "/"
-            + radarActiveFrames.length;
+        return radarTimeframeLabel(radarDisplayedFrame) + " · "
+            + radarFrameAt;
     }
 
-    function radarTimelineLabel(frame) {
-        if (frame.forecast)
-            return "+" + frame.offsetMinutes + " FCST";
-        if (frame.offsetMinutes < 0)
-            return frame.offsetMinutes + " OBS";
+    function radarTimeframeLabel(frame) {
+        return radarTimeframeLabelForOffset(frame.offsetMinutes);
+    }
+
+    function radarTimeframeLabelForOffset(offsetMinutes) {
+        if (offsetMinutes > 0)
+            return "IN " + offsetMinutes + " MIN";
+        if (offsetMinutes < 0)
+            return Math.abs(offsetMinutes) + " MIN AGO";
         return "NOW";
+    }
+
+    function radarFrameForOffset(offsetMinutes) {
+        for (const frame of radarActiveFrames) {
+            if (frame.offsetMinutes === offsetMinutes)
+                return frame;
+        }
+        return null;
     }
 
     function radarFramesAddInformation(candidateFrames, existingFrames) {
@@ -1239,6 +1245,7 @@ Scope {
         color: "transparent"
         exclusiveZone: 0
         focusable: false
+        mask: Region {}
 
         Rectangle {
             anchors.fill: parent
@@ -1418,6 +1425,7 @@ Scope {
         color: "transparent"
         exclusiveZone: 0
         focusable: false
+        mask: Region {}
 
         Rectangle {
             anchors.fill: parent
@@ -1679,6 +1687,7 @@ Scope {
         color: "transparent"
         exclusiveZone: 0
         focusable: false
+        mask: Region {}
 
         Rectangle {
             anchors.fill: parent
@@ -2069,6 +2078,9 @@ Scope {
         color: "transparent"
         exclusiveZone: 0
         focusable: false
+        mask: Region {
+            item: jmaNowcastLink
+        }
 
         Rectangle {
             anchors.fill: parent
@@ -2214,6 +2226,8 @@ Scope {
                     }
 
                     Text {
+                        id: jmaNowcastLink
+
                         anchors {
                             right: parent.right
                             bottom: parent.bottom
@@ -2236,7 +2250,7 @@ Scope {
                             right: parent.right
                         }
                         visible: shell.radarAvailable
-                        height: 18
+                        height: 22
                         color: theme.radarTelemetryBackground
                         z: 2
 
@@ -2250,68 +2264,68 @@ Scope {
                             color: theme.radarGrid
                         }
 
-                        Text {
-                            anchors {
-                                left: parent.left
-                                leftMargin: 5
-                                verticalCenter: parent.verticalCenter
-                            }
-                            text: "FRAME " + (shell.radarFrameIndex + 1)
-                                + "/" + shell.radarActiveFrames.length
-                            color: theme.textSecondary
-                            font.family: "Adwaita Mono"
-                            font.pixelSize: 8
-                            font.weight: Font.Medium
-                        }
-
                         Row {
-                            anchors.centerIn: parent
-                            spacing: 4
+                            id: radarTimelineSegments
+
+                            anchors.fill: parent
 
                             Repeater {
-                                model: shell.radarActiveFrames
+                                model: [-10, 0, 10]
 
-                                delegate: Row {
+                                delegate: Item {
                                     required property int index
-                                    required property var modelData
+                                    required property int modelData
 
-                                    spacing: 4
+                                    width: radarTimelineSegments.width / 3
+                                    height: radarTimelineSegments.height
 
-                                    Text {
-                                        text: shell.radarTimelineLabel(modelData)
-                                        color: index === shell.radarFrameIndex
+                                    readonly property var frameData:
+                                        shell.radarFrameForOffset(modelData)
+                                    readonly property bool available:
+                                        frameData !== null
+                                    readonly property string label:
+                                        shell.radarTimeframeLabelForOffset(
+                                            modelData
+                                        )
+                                    readonly property bool active:
+                                        shell.radarDisplayedFrame !== null
+                                            && shell.radarDisplayedFrame
+                                                .offsetMinutes === modelData
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        anchors.margins: 2
+                                        color: parent.active
                                             ? theme.textPrimary
-                                            : theme.textTertiary
-                                        font.family: "Adwaita Mono"
-                                        font.pixelSize: 8
-                                        font.weight:
-                                            index === shell.radarFrameIndex
-                                                ? Font.Medium : Font.Normal
+                                            : "transparent"
+                                    }
+
+                                    Rectangle {
+                                        anchors {
+                                            right: parent.right
+                                            verticalCenter: parent.verticalCenter
+                                        }
+                                        visible: index < 2
+                                        width: 1
+                                        height: parent.height - 10
+                                        color: theme.radarGrid
                                     }
 
                                     Text {
-                                        visible: index
-                                            < shell.radarActiveFrames.length - 1
-                                        text: "|"
-                                        color: theme.textDisabled
+                                        anchors.centerIn: parent
+                                        text: parent.label
+                                        color: parent.active
+                                            ? theme.radarBackground
+                                            : parent.available
+                                                ? theme.textSecondary
+                                                : theme.textDisabled
                                         font.family: "Adwaita Mono"
-                                        font.pixelSize: 8
+                                        font.pixelSize: 9
+                                        font.weight: parent.active
+                                            ? Font.Bold : Font.Medium
                                     }
                                 }
                             }
-                        }
-
-                        Text {
-                            anchors {
-                                right: parent.right
-                                rightMargin: 5
-                                verticalCenter: parent.verticalCenter
-                            }
-                            text: shell.radarPlaybackMode
-                            color: theme.textTertiary
-                            font.family: "Adwaita Mono"
-                            font.pixelSize: 8
-                            font.weight: Font.Medium
                         }
                     }
                 }

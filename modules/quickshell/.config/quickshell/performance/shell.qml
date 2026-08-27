@@ -310,11 +310,15 @@ Scope {
             ? Math.max(0, nowMs - metrics.lastUpdateMs) : -1;
     }
 
-    function moduleHealth(metrics) {
+    function moduleHealth(metrics, staleIsUnknown) {
         if (!metrics.available)
             return 0;
         const age = sampleAgeMs(metrics);
-        if (age > freshnessErrorMs || metrics.unavailable)
+        if (metrics.unavailable)
+            return 3;
+        if (staleIsUnknown && age > freshnessCautionMs)
+            return 0;
+        if (age > freshnessErrorMs)
             return 3;
         if (age > freshnessCautionMs || metrics.partial)
             return 2;
@@ -334,13 +338,13 @@ Scope {
         }
     }
 
-    function moduleTone(metrics) {
-        return healthTone(moduleHealth(metrics));
+    function moduleTone(metrics, staleIsUnknown) {
+        return healthTone(moduleHealth(metrics, staleIsUnknown));
     }
 
     function combinedModuleTone(firstMetrics, secondMetrics) {
-        const first = moduleHealth(firstMetrics);
-        const second = moduleHealth(secondMetrics);
+        const first = moduleHealth(firstMetrics, false);
+        const second = moduleHealth(secondMetrics, true);
         if (first === 0 && second === 0)
             return theme.statusUnknown;
         if (first === 1 && second === 1)
@@ -756,6 +760,7 @@ Scope {
         required property string title
         required property string platform
         required property string detail
+        property bool staleIsUnknown: false
 
         implicitHeight: 24
 
@@ -764,7 +769,8 @@ Scope {
                 left: parent.left
                 verticalCenter: parent.verticalCenter
             }
-            tone: shell.moduleTone(moduleHeader.metrics)
+            tone: shell.moduleTone(
+                moduleHeader.metrics, moduleHeader.staleIsUnknown)
         }
 
         Text {
@@ -1881,7 +1887,7 @@ Scope {
             MetricCell {
                 width: parent.width / 2
                 label: "DOWNLOAD"
-                valueText: shell.byteRateValue(
+                valueText: "↓ " + shell.byteRateValue(
                     networkSection.metrics.networkDownload,
                     networkSection.metrics.networkAvailable
                 )
@@ -1894,7 +1900,7 @@ Scope {
             MetricCell {
                 width: parent.width / 2
                 label: "UPLOAD"
-                valueText: shell.byteRateValue(
+                valueText: "↑ " + shell.byteRateValue(
                     networkSection.metrics.networkUpload,
                     networkSection.metrics.networkAvailable
                 )
@@ -2133,6 +2139,7 @@ Scope {
             ModuleHeader {
                 width: parent.width
                 metrics: remoteSystemPanel.metrics
+                staleIsUnknown: true
                 title: "MAIN PC"
                 platform: "WINDOWS"
                 detail: remoteSystemPanel.metrics.available
@@ -2217,6 +2224,7 @@ Scope {
         color: "transparent"
         exclusiveZone: 0
         focusable: false
+        mask: Region {}
 
         Item {
             id: cards

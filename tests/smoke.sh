@@ -11,7 +11,7 @@ while IFS= read -r -d '' script; do
 done < <(find "$ROOT" -type f -name '*.sh' -print0 | sort -z)
 bash -n "$ROOT/modules/dotfiles-cli/.local/bin/dotfiles"
 printf 'ok  modules/dotfiles-cli/.local/bin/dotfiles\n'
-for entrypoint in cleanup.sh modules/dotfiles-cli/.local/bin/dotfiles; do
+for entrypoint in sync.sh modules/dotfiles-cli/.local/bin/dotfiles; do
   [[ -x "$ROOT/$entrypoint" ]] || {
     printf 'entry point is not executable: %s\n' "$entrypoint" >&2
     exit 1
@@ -335,20 +335,20 @@ grep -Fq 'Native groups:    win32yank' <<<"$output"
 printf 'ok  explicit win32yank module\n'
 rm -rf "$test_home"
 
-printf '\n== Update dry-run ==\n'
+printf '\n== Sync dry-run ==\n'
 test_home="$(mktemp -d)"
 output="$(
   HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
-    "$ROOT/update.sh" --profile development --dry-run
+    "$ROOT/sync.sh" --profile development --dry-run
 )"
 grep -Fq 'brew bundle upgrade' <<<"$output"
 grep -Fq 'mise upgrade node' <<<"$output"
 grep -Fq 'sheldon lock --update' <<<"$output"
 if grep -Eq 'apt(-get)?[[:space:]]+upgrade|pacman[[:space:]].*-Syu' <<<"$output"; then
-  printf 'unexpected native OS upgrade in update output\n' >&2
+  printf 'unexpected native OS upgrade in sync output\n' >&2
   exit 1
 fi
-printf 'ok  selected Homebrew/mise/Sheldon update only\n'
+printf 'ok  selected Homebrew/mise/Sheldon sync only\n'
 rm -rf "$test_home"
 
 printf '\n== Conflict backup ==\n'
@@ -418,23 +418,7 @@ reconcile_stale_managed_links 0 expected_paths
 grep -Fqx 'user-owned' "$HOME/.local/bin/dotfiles"
 BASH
 
-old_backup="$test_home/.local/state/dotfiles-linux/backups/20000101-000000-1"
-mkdir -p "$old_backup"
-touch -d '40 days ago' "$old_backup"
-output="$(
-  HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
-    "$ROOT/cleanup.sh" --dry-run --backups-older-than 30d
-)"
-grep -Fq "remove old backup $old_backup" <<<"$output"
-[[ -d "$old_backup" ]]
-HOME="$test_home" DOTFILES_ROOT="$ROOT" bash <<'BASH'
-set -euo pipefail
-source "$DOTFILES_ROOT/lib/common.sh"
-source "$DOTFILES_ROOT/lib/state.sh"
-prune_old_backups 30d 0
-BASH
-[[ ! -d "$old_backup" ]]
-printf 'ok  saved state, safe link cleanup, and guarded backup pruning\n'
+printf 'ok  saved state and safe link reconciliation\n'
 rm -rf "$test_home"
 
 if command -v stow >/dev/null 2>&1; then
@@ -525,24 +509,16 @@ if command -v stow >/dev/null 2>&1; then
 
   output="$(
     HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
-      "$test_home/.local/bin/dotfiles" update --dry-run --no-pull
+      "$test_home/.local/bin/dotfiles" sync --dry-run --no-pull
   )"
   grep -Fq 'Selected modules:' <<<"$output"
   grep -Fq 'brew bundle upgrade' <<<"$output"
   if grep -Fq 'mise upgrade node' <<<"$output"; then
-    printf 'server update must not include mise-managed Node.js\n' >&2
+    printf 'server sync must not include mise-managed Node.js\n' >&2
     exit 1
   fi
   grep -Fq "$ROOT/doctor.sh" <<<"$output"
-  printf 'ok  unified update uses the saved profile\n'
-
-  output="$(
-    HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
-      "$test_home/.local/bin/dotfiles" cleanup --dry-run --system-cache
-  )"
-  grep -Fq 'brew cleanup' <<<"$output"
-  grep -Fq 'sudo apt-get clean' <<<"$output"
-  printf 'ok  cleanup previews selected Homebrew and system cache operations\n'
+  printf 'ok  unified sync uses the saved profile\n'
 
   HOME="$test_home" DOTFILES_DISTRO_OVERRIDE=ubuntu \
     "$test_home/.local/bin/dotfiles" uninstall --dry-run >/dev/null
@@ -560,6 +536,11 @@ if command -v zsh >/dev/null 2>&1; then
   printf '\n== Zsh syntax ==\n'
   zsh -n "$ROOT/modules/zsh/.zshrc"
   printf 'ok  modules/zsh/.zshrc\n'
+  grep -Fqx 'abbr "up"="yay -Syu --noconfirm && brew update && brew upgrade"' \
+    "$ROOT/modules/zsh-abbr/.config/zsh-abbr/user-abbreviations"
+  grep -Fqx 'abbr "clean"="yay -Sc --noconfirm && brew cleanup"' \
+    "$ROOT/modules/zsh-abbr/.config/zsh-abbr/user-abbreviations"
+  printf 'ok  package maintenance abbreviations are non-interactive\n'
 fi
 
 lua_compiler=""

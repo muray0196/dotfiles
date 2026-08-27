@@ -22,7 +22,7 @@ DRY_RUN=0
 
 usage() {
   cat <<'USAGE'
-Usage: ./update.sh [--profile NAME] [--module NAME ...] [--dry-run]
+Usage: ./sync.sh [--profile NAME] [--module NAME ...] [--dry-run]
 
 Updates Homebrew packages selected by the profile/module, configured mise
 runtimes, and Sheldon plugins. It deliberately does not run apt upgrade or

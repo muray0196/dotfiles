@@ -232,41 +232,6 @@ reconcile_stale_managed_links() {
   done
 }
 
-prune_old_backups() {
-  local age="$1"
-  local dry_run="${2:-${DRY_RUN:-0}}"
-  local days="${age%d}"
-  [[ "$age" =~ ^[0-9]+d?$ ]] || die "Invalid backup age: $age (expected a value such as 30d)"
-
-  local backup_root="$DOTFILES_STATE_ROOT/backups"
-  [[ -d "$backup_root" ]] || return 0
-
-  local resolved_root resolved_home candidate resolved_candidate name
-  resolved_root="$(readlink -m -- "$backup_root")"
-  resolved_home="$(readlink -m -- "$HOME")"
-  [[ "$resolved_root" != "/" && "$resolved_root" != "$resolved_home" ]] ||
-    die "Refusing to prune unsafe backup root: $resolved_root"
-
-  while IFS= read -r -d '' candidate; do
-    resolved_candidate="$(readlink -m -- "$candidate")"
-    [[ "$resolved_candidate" == "$resolved_root"/* ]] ||
-      die "Refusing to prune a path outside the backup root: $resolved_candidate"
-
-    name="$(basename "$resolved_candidate")"
-    if [[ ! "$name" =~ ^[0-9]{8}-[0-9]{6}-[0-9]+$ ]]; then
-      warn "Ignoring unrecognized backup directory: $resolved_candidate"
-      continue
-    fi
-
-    if [[ "$dry_run" == "1" ]]; then
-      printf '[dry-run] remove old backup %q\n' "$resolved_candidate"
-    else
-      rm -rf -- "$resolved_candidate"
-      info "Removed old backup: $name"
-    fi
-  done < <(find "$resolved_root" -mindepth 1 -maxdepth 1 -type d -mtime "+$days" -print0)
-}
-
 clear_installation_state() {
   rm -f -- "$DOTFILES_SELECTION_FILE" "$DOTFILES_MANAGED_PATHS_FILE"
 }

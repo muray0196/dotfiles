@@ -62,28 +62,15 @@ Start a new Zsh session after installation. The unified command is then availabl
 # Show the active repository, revision, and profile
 dotfiles status
 
-# Preview and apply repository, package, plugin, and configuration updates
-dotfiles update --dry-run
-dotfiles update
-
-# Preview and clean stale managed links and old selected Homebrew versions
-dotfiles cleanup --dry-run
-dotfiles cleanup
-
-# Optionally clean the native package cache
-dotfiles cleanup --system-cache
+# Preview and synchronize the repository, packages, plugins, and configuration
+dotfiles sync --dry-run
+dotfiles sync
 
 # Validate the saved selection
 dotfiles doctor
 ```
 
-`dotfiles update` requires a clean repository and uses `git pull --ff-only` before reconciling the saved selection.
-`dotfiles cleanup` never runs `apt autoremove` or automatic pacman orphan removal, and it does not delete backups by default.
-Backup pruning must be requested explicitly:
-
-```bash
-dotfiles cleanup --backups-older-than 30d
-```
+`dotfiles sync` requires a clean repository and uses `git pull --ff-only` before reconciling the saved selection.
 
 ## Other commands
 
@@ -151,7 +138,7 @@ User-facing CLI tools are installed with Homebrew, while language runtimes are m
 | Homebrew | Starship, Sheldon, Neovim, fzf, ripgrep, fastfetch, uv, Stylua, gh, and mise |
 | mise | Node.js 24 |
 
-Normal profile application uses `brew bundle --no-upgrade`; Homebrew and mise upgrades remain explicit through `dotfiles update`.
+Normal profile application uses `brew bundle --no-upgrade`; Homebrew and mise upgrades remain explicit through `dotfiles sync`.
 The Arch Linux Homebrew bootstrap installs the `base-devel` package.
 
 ## Repository layout
@@ -161,7 +148,7 @@ profiles/   Profile definitions
 manifests/  Module dependencies and installation definitions
 packages/   apt, pacman, and Homebrew package definitions
 modules/    Configuration deployed with GNU Stow
-lib/        Shared installer, state, and cleanup implementation
+lib/        Shared installation, package, and state implementation
 scripts/    Explicit additional setup tasks
 services/   Optional services
 tests/      Validation
