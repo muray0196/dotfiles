@@ -1750,6 +1750,9 @@ Scope {
                         width: parent.width
                         palette: theme
                         label: "INDOOR"
+                        healthMarkerVisible: true
+                        healthTone: shell.indoorSourceCurrent
+                            ? theme.statusOk : shell.indoorSourceTone
                         metadata: shell.sensorLinkSummary
                         metadataVisible: shell.indoorSourceCurrent
                         statusActive: !shell.indoorSourceCurrent
@@ -1811,6 +1814,9 @@ Scope {
                         width: parent.width
                         palette: theme
                         label: "OUTDOOR"
+                        healthMarkerVisible: true
+                        healthTone: shell.outdoorSourceCurrent
+                            ? theme.statusOk : shell.outdoorSourceTone
                         metadata: "OBS " + shell.weatherObservedAt
                         metadataVisible: shell.outdoorSourceCurrent
                         statusActive: !shell.outdoorSourceCurrent

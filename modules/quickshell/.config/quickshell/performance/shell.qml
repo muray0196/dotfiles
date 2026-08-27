@@ -1227,8 +1227,8 @@ Scope {
                                 left: parent.left
                                 verticalCenter: parent.verticalCenter
                             }
-                            width: 2
-                            height: 26
+                            width: 5
+                            height: 5
                             color: performanceSummaryPanel.localFresh
                                 ? theme.statusOk : theme.textDisabled
                         }
@@ -1236,7 +1236,7 @@ Scope {
                         Text {
                             anchors {
                                 left: parent.left
-                                leftMargin: 7
+                                leftMargin: 9
                                 verticalCenter: parent.verticalCenter
                             }
                             text: "LOCAL"
@@ -1301,8 +1301,8 @@ Scope {
                                 left: parent.left
                                 verticalCenter: parent.verticalCenter
                             }
-                            width: 2
-                            height: 26
+                            width: 5
+                            height: 5
                             color: performanceSummaryPanel.mainFresh
                                 ? theme.statusOk : theme.textDisabled
                         }
@@ -1310,7 +1310,7 @@ Scope {
                         Text {
                             anchors {
                                 left: parent.left
-                                leftMargin: 7
+                                leftMargin: 9
                                 verticalCenter: parent.verticalCenter
                             }
                             text: "MAIN"

@@ -8,15 +8,30 @@ Item {
     property string metadata: ""
     property bool metadataVisible: metadata !== ""
     property color metadataTone: palette.textMuted
+    property bool healthMarkerVisible: false
+    property color healthTone: palette.statusUnknown
     property bool statusActive: false
     property string statusLabel: ""
     property color statusTone: palette.statusUnknown
 
     implicitHeight: 19
 
+    Rectangle {
+        anchors {
+            left: parent.left
+            verticalCenter: parent.verticalCenter
+        }
+        visible: sectionHeader.healthMarkerVisible
+        width: 5
+        height: 5
+        radius: 0
+        color: sectionHeader.healthTone
+    }
+
     Text {
         anchors {
             left: parent.left
+            leftMargin: sectionHeader.healthMarkerVisible ? 9 : 0
             verticalCenter: parent.verticalCenter
         }
         text: sectionHeader.label
