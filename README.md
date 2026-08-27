@@ -72,6 +72,13 @@ dotfiles doctor
 
 `dotfiles sync` requires a clean repository and uses `git pull --ff-only` before reconciling the saved selection.
 
+The `up` abbreviation upgrades pacman/AUR and Homebrew packages, then runs
+`hermes update` when Hermes is installed. Waywallen is intentionally separate:
+`wwup` checks the official AppImage release, verifies its published SHA-256,
+installs it beside the current version, and retains only the immediately
+previous version for rollback. Locally patched llama.cpp builds are not updated
+by either command.
+
 ## Other commands
 
 ```bash

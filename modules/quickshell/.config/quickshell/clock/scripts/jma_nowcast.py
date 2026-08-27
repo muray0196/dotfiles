@@ -6,10 +6,12 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import struct
 import sys
+import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.request import Request, urlopen
 
 from clock_config import DEFAULT_CONFIG, load_clock_config
@@ -32,7 +34,11 @@ TILE_SIZE = 256
 VIEWPORT_WIDTH = 280
 VIEWPORT_HEIGHT = 192
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) QuickshellNowcastWidget/1.0"
-FRAME_INTERVAL_MINUTES = 10
+FRAME_INTERVAL_MINUTES = 5
+RAIN_DETECTION_RADIUS_METERS = 5_000.0
+RAIN_DETECTION_MIN_AREA_SQUARE_METERS = 250_000.0
+MAX_RADAR_TILE_BYTES = 2 * 1024 * 1024
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 def web_mercator_position(
@@ -204,6 +210,253 @@ def download_manifest(url: str, timeout: float) -> Any:
         return json.load(response)
 
 
+def download_radar_tile(url: str, timeout: float) -> bytes:
+    request = Request(
+        url,
+        headers={"User-Agent": USER_AGENT, "Accept": "image/png"},
+    )
+    with urlopen(request, timeout=timeout) as response:
+        data = response.read(MAX_RADAR_TILE_BYTES + 1)
+    if len(data) > MAX_RADAR_TILE_BYTES:
+        raise ValueError("radar tile is unexpectedly large")
+    return data
+
+
+def decode_indexed_png_alpha(data: bytes) -> tuple[int, int, list[bytes]]:
+    """Decode alpha values from a non-interlaced indexed PNG."""
+    if not data.startswith(PNG_SIGNATURE):
+        raise ValueError("radar tile is not a PNG")
+
+    header: tuple[int, int, int, int, int, int, int] | None = None
+    palette_entries = 0
+    transparency: bytes | None = None
+    image_data: list[bytes] = []
+    offset = len(PNG_SIGNATURE)
+    found_end = False
+
+    while offset + 12 <= len(data):
+        length = struct.unpack(">I", data[offset : offset + 4])[0]
+        chunk_end = offset + 12 + length
+        if chunk_end > len(data):
+            raise ValueError("radar PNG has a truncated chunk")
+        chunk_type = data[offset + 4 : offset + 8]
+        payload = data[offset + 8 : offset + 8 + length]
+        offset = chunk_end
+
+        if chunk_type == b"IHDR":
+            if length != 13:
+                raise ValueError("radar PNG has an invalid header")
+            header = struct.unpack(">IIBBBBB", payload)
+        elif chunk_type == b"PLTE":
+            if length == 0 or length % 3 != 0:
+                raise ValueError("radar PNG has an invalid palette")
+            palette_entries = length // 3
+        elif chunk_type == b"tRNS":
+            transparency = payload
+        elif chunk_type == b"IDAT":
+            image_data.append(payload)
+        elif chunk_type == b"IEND":
+            found_end = True
+            break
+
+    if header is None or not found_end or not image_data:
+        raise ValueError("radar PNG is incomplete")
+
+    width, height, bit_depth, color_type, compression, filtering, interlace = (
+        header
+    )
+    if width < 1 or height < 1:
+        raise ValueError("radar PNG has invalid dimensions")
+    if (
+        color_type != 3
+        or bit_depth not in (1, 2, 4, 8)
+        or compression != 0
+        or filtering != 0
+        or interlace != 0
+    ):
+        raise ValueError("radar PNG uses an unsupported format")
+    if palette_entries < 1 or transparency is None:
+        raise ValueError("radar PNG has no transparent indexed palette")
+
+    row_bytes = (width * bit_depth + 7) // 8
+    try:
+        raw = zlib.decompress(b"".join(image_data))
+    except zlib.error as error:
+        raise ValueError("radar PNG image data is invalid") from error
+    if len(raw) != height * (row_bytes + 1):
+        raise ValueError("radar PNG image data has an unexpected size")
+
+    rows: list[bytes] = []
+    previous = bytearray(row_bytes)
+    raw_offset = 0
+    pixels_per_byte = 8 // bit_depth
+    index_mask = (1 << bit_depth) - 1
+
+    for _ in range(height):
+        filter_type = raw[raw_offset]
+        raw_offset += 1
+        scanline = raw[raw_offset : raw_offset + row_bytes]
+        raw_offset += row_bytes
+        decoded = bytearray(row_bytes)
+
+        for index, value in enumerate(scanline):
+            left = decoded[index - 1] if index > 0 else 0
+            above = previous[index]
+            upper_left = previous[index - 1] if index > 0 else 0
+            if filter_type == 0:
+                predictor = 0
+            elif filter_type == 1:
+                predictor = left
+            elif filter_type == 2:
+                predictor = above
+            elif filter_type == 3:
+                predictor = (left + above) // 2
+            elif filter_type == 4:
+                estimate = left + above - upper_left
+                left_distance = abs(estimate - left)
+                above_distance = abs(estimate - above)
+                upper_left_distance = abs(estimate - upper_left)
+                if left_distance <= above_distance and (
+                    left_distance <= upper_left_distance
+                ):
+                    predictor = left
+                elif above_distance <= upper_left_distance:
+                    predictor = above
+                else:
+                    predictor = upper_left
+            else:
+                raise ValueError("radar PNG uses an invalid row filter")
+            decoded[index] = (value + predictor) & 0xFF
+
+        alpha = bytearray(width)
+        for pixel in range(width):
+            packed = decoded[pixel // pixels_per_byte]
+            shift = 8 - bit_depth * (pixel % pixels_per_byte + 1)
+            palette_index = (packed >> shift) & index_mask
+            if palette_index >= palette_entries:
+                raise ValueError("radar PNG references an invalid palette entry")
+            alpha[pixel] = (
+                transparency[palette_index]
+                if palette_index < len(transparency)
+                else 255
+            )
+        rows.append(bytes(alpha))
+        previous = decoded
+
+    return width, height, rows
+
+
+def frame_has_nearby_precipitation(
+    frame: dict[str, Any],
+    *,
+    center_pixel_x: float,
+    center_pixel_y: float,
+    tile_size: int,
+    source_pixel_meters: float,
+    timeout: float,
+    tile_loader: Callable[[str, float], bytes] = download_radar_tile,
+) -> bool:
+    radius_pixels = RAIN_DETECTION_RADIUS_METERS / source_pixel_meters
+    radius_squared = radius_pixels * radius_pixels
+    required_pixels = math.ceil(
+        RAIN_DETECTION_MIN_AREA_SQUARE_METERS
+        / (source_pixel_meters * source_pixel_meters)
+    )
+    precipitation_pixels = 0
+    intersecting_tiles = 0
+
+    for tile in frame["radar_tiles"]:
+        tile_left = tile["column"] * tile_size
+        tile_top = tile["row"] * tile_size
+        nearest_x = min(
+            max(center_pixel_x, tile_left), tile_left + tile_size
+        )
+        nearest_y = min(
+            max(center_pixel_y, tile_top), tile_top + tile_size
+        )
+        if (
+            (nearest_x - center_pixel_x) ** 2
+            + (nearest_y - center_pixel_y) ** 2
+            > radius_squared
+        ):
+            continue
+
+        intersecting_tiles += 1
+        width, height, alpha_rows = decode_indexed_png_alpha(
+            tile_loader(tile["url"], timeout)
+        )
+        if width != tile_size or height != tile_size:
+            raise ValueError("radar tile dimensions do not match the manifest")
+
+        for local_y, alpha_row in enumerate(alpha_rows):
+            pixel_y = tile_top + local_y + 0.5
+            vertical_distance = pixel_y - center_pixel_y
+            horizontal_extent_squared = (
+                radius_squared - vertical_distance * vertical_distance
+            )
+            if horizontal_extent_squared < 0:
+                continue
+            horizontal_extent = math.sqrt(horizontal_extent_squared)
+            first_x = max(
+                0,
+                math.ceil(center_pixel_x - horizontal_extent - tile_left - 0.5),
+            )
+            last_x = min(
+                width - 1,
+                math.floor(center_pixel_x + horizontal_extent - tile_left - 0.5),
+            )
+            if first_x > last_x:
+                continue
+            precipitation_pixels += sum(
+                alpha > 0 for alpha in alpha_row[first_x : last_x + 1]
+            )
+            if precipitation_pixels >= required_pixels:
+                return True
+
+    if intersecting_tiles == 0:
+        raise ValueError("radar frame does not cover the detection radius")
+    return False
+
+
+def detect_nearby_precipitation(
+    radar: dict[str, Any],
+    *,
+    timeout: float,
+    tile_loader: Callable[[str, float], bytes] = download_radar_tile,
+) -> bool | None:
+    source_pixel_meters = radar["meters_per_pixel"] * radar["radar_scale"]
+    if source_pixel_meters <= 0:
+        return None
+
+    current = next(
+        (
+            frame
+            for frame in radar["frames"]
+            if frame["offset_minutes"] == 0
+        ),
+        None,
+    )
+    if current is None:
+        return None
+
+    try:
+        return frame_has_nearby_precipitation(
+            current,
+            center_pixel_x=radar["radar_center_pixel_x"],
+            center_pixel_y=radar["radar_center_pixel_y"],
+            tile_size=radar["tile_size"],
+            source_pixel_meters=source_pixel_meters,
+            timeout=timeout,
+            tile_loader=tile_loader,
+        )
+    except (OSError, ValueError) as error:
+        print(
+            f"JMA nearby precipitation detection unavailable for now: {error}",
+            file=sys.stderr,
+        )
+        return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -220,7 +473,7 @@ def main() -> int:
     parser.add_argument(
         "--animation-frames",
         action="store_true",
-        help="include the 10-minute past and forecast frames",
+        help="include the 5-minute past and forecast frames",
     )
     parser.add_argument(
         "--timeout",
@@ -238,31 +491,48 @@ def main() -> int:
             if args.file is not None
             else download_manifest(OBSERVATION_MANIFEST_URL, args.timeout)
         )
-        include_animation_frames = (
+        animation_requested = (
             args.animation_frames or args.forecast_file is not None
         )
-        forecast_manifest = None
-        if include_animation_frames and args.forecast_file is not None:
-            forecast_manifest = json.loads(
-                args.forecast_file.read_text(encoding="utf-8")
-            )
-        elif include_animation_frames and args.file is None:
-            try:
-                forecast_manifest = download_manifest(
-                    FORECAST_MANIFEST_URL, args.timeout
-                )
-            except (OSError, ValueError, json.JSONDecodeError) as error:
-                print(
-                    f"JMA nowcast forecast unavailable: {error}",
-                    file=sys.stderr,
-                )
         radar = parse_manifests(
             observation_manifest,
-            forecast_manifest,
-            include_animation_frames=include_animation_frames,
+            None,
+            include_animation_frames=False,
             latitude=config.latitude,
             longitude=config.longitude,
         )
+        nearby_precipitation = (
+            None
+            if args.file is not None
+            else detect_nearby_precipitation(
+                radar,
+                timeout=args.timeout,
+            )
+        )
+        if animation_requested or nearby_precipitation is True:
+            forecast_manifest = None
+            if args.forecast_file is not None:
+                forecast_manifest = json.loads(
+                    args.forecast_file.read_text(encoding="utf-8")
+                )
+            elif args.file is None:
+                try:
+                    forecast_manifest = download_manifest(
+                        FORECAST_MANIFEST_URL, args.timeout
+                    )
+                except (OSError, ValueError, json.JSONDecodeError) as error:
+                    print(
+                        f"JMA nowcast forecast unavailable: {error}",
+                        file=sys.stderr,
+                    )
+            radar = parse_manifests(
+                observation_manifest,
+                forecast_manifest,
+                include_animation_frames=True,
+                latitude=config.latitude,
+                longitude=config.longitude,
+            )
+        radar["nearby_precipitation"] = nearby_precipitation
     except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
         print(f"JMA nowcast fetch failed: {error}", file=sys.stderr)
         return 1

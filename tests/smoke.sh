@@ -11,7 +11,12 @@ while IFS= read -r -d '' script; do
 done < <(find "$ROOT" -type f -name '*.sh' -print0 | sort -z)
 bash -n "$ROOT/modules/dotfiles-cli/.local/bin/dotfiles"
 printf 'ok  modules/dotfiles-cli/.local/bin/dotfiles\n'
-for entrypoint in sync.sh modules/dotfiles-cli/.local/bin/dotfiles; do
+bash -n "$ROOT/modules/zsh-abbr/.local/bin/waywallen-update"
+printf 'ok  modules/zsh-abbr/.local/bin/waywallen-update\n'
+for entrypoint in \
+  sync.sh \
+  modules/dotfiles-cli/.local/bin/dotfiles \
+  modules/zsh-abbr/.local/bin/waywallen-update; do
   [[ -x "$ROOT/$entrypoint" ]] || {
     printf 'entry point is not executable: %s\n' "$entrypoint" >&2
     exit 1
@@ -438,6 +443,7 @@ if command -v stow >/dev/null 2>&1; then
     .config/zsh-abbr/user-abbreviations \
     .config/nvim/init.lua \
     .local/bin/dotfiles \
+    .local/bin/waywallen-update \
     .gitconfig; do
     [[ -L "$test_home/$relative" ]] || {
       printf 'expected managed symlink: %s\n' "$relative" >&2
@@ -448,6 +454,8 @@ if command -v stow >/dev/null 2>&1; then
 
   grep -Fqx 'profile:shell' "$test_home/.local/state/dotfiles-linux/selection"
   grep -Fqx '.local/bin/dotfiles' "$test_home/.local/state/dotfiles-linux/managed-paths"
+  grep -Fqx '.local/bin/waywallen-update' \
+    "$test_home/.local/state/dotfiles-linux/managed-paths"
   grep -Fqx '.config/starship.toml' "$test_home/.local/state/dotfiles-linux/managed-paths"
   status_output="$(HOME="$test_home" "$test_home/.local/bin/dotfiles" status)"
   grep -Fq 'Profile:    shell' <<<"$status_output"
@@ -462,6 +470,8 @@ if command -v stow >/dev/null 2>&1; then
   [[ ! -e "$test_home/.config/starship/arch.toml" &&
     ! -L "$test_home/.config/starship/arch.toml" ]]
   [[ ! -e "$test_home/.config/nvim/init.lua" && ! -L "$test_home/.config/nvim/init.lua" ]]
+  [[ ! -e "$test_home/.local/bin/waywallen-update" &&
+    ! -L "$test_home/.local/bin/waywallen-update" ]]
   backup="$(find "$test_home/.local/state/dotfiles-linux/backups" -type f -name .zshrc -print -quit)"
   grep -Fqx 'legacy-zshrc' "$backup"
   printf 'ok  apply, backup, link verification, and unstow\n'
@@ -536,7 +546,9 @@ if command -v zsh >/dev/null 2>&1; then
   printf '\n== Zsh syntax ==\n'
   zsh -n "$ROOT/modules/zsh/.zshrc"
   printf 'ok  modules/zsh/.zshrc\n'
-  grep -Fqx 'abbr "up"="yay -Syu --noconfirm && brew update && brew upgrade"' \
+  grep -Fqx 'abbr "up"="yay -Syu --noconfirm && brew update && brew upgrade && (! command -v hermes >/dev/null 2>&1 || hermes update)"' \
+    "$ROOT/modules/zsh-abbr/.config/zsh-abbr/user-abbreviations"
+  grep -Fqx 'abbr "wwup"="waywallen-update"' \
     "$ROOT/modules/zsh-abbr/.config/zsh-abbr/user-abbreviations"
   grep -Fqx 'abbr "clean"="yay -Sc --noconfirm && brew cleanup"' \
     "$ROOT/modules/zsh-abbr/.config/zsh-abbr/user-abbreviations"
@@ -564,6 +576,7 @@ if command -v shellcheck >/dev/null 2>&1; then
     find "$ROOT" -type f -name '*.sh' ! -path "$ROOT/lib/*" -print0 | sort -z
   )
   scripts+=("$ROOT/modules/dotfiles-cli/.local/bin/dotfiles")
+  scripts+=("$ROOT/modules/zsh-abbr/.local/bin/waywallen-update")
   shellcheck -x "${scripts[@]}"
   printf 'ok  shellcheck\n'
 fi

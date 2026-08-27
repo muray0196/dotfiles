@@ -1,0 +1,324 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly RELEASE_API="https://api.github.com/repos/waywallen/waywallen/releases/latest"
+
+check_only=0
+temp_dir=""
+staging_path=""
+replacement_link=""
+
+usage() {
+  cat <<'USAGE'
+Usage: waywallen-update [--check]
+
+Update an existing versioned Waywallen AppImage installation.
+
+Options:
+  --check  Report whether a newer release is available without installing it
+  -h       Show this help
+USAGE
+}
+
+die() {
+  printf 'waywallen-update: %s\n' "$*" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "required command is unavailable: $1"
+}
+
+cleanup() {
+  if [[ -n "$replacement_link" ]]; then
+    sudo rm -f -- "$replacement_link" 2>/dev/null || true
+  fi
+  if [[ -n "$staging_path" ]]; then
+    sudo rm -rf -- "$staging_path" 2>/dev/null || true
+  fi
+  if [[ -n "$temp_dir" ]]; then
+    rm -rf -- "$temp_dir"
+  fi
+}
+
+find_update_link() {
+  local candidate="$1"
+  local link_target
+
+  while [[ -L "$candidate" ]]; do
+    link_target="$(readlink -- "$candidate")"
+    if [[ "$link_target" != /* ]]; then
+      link_target="$(dirname -- "$candidate")/$link_target"
+    fi
+    link_target="$(readlink -m -- "$link_target")"
+
+    if [[ -L "$link_target" ]]; then
+      candidate="$link_target"
+    else
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+waywallen_version_for_directory() {
+  local directory="$1"
+  local output
+
+  [[ -d "$directory" && ! -L "$directory" ]] || return 1
+  [[ -x "$directory/AppRun" && -x "$directory/usr/bin/waywallen" ]] || return 1
+
+  output="$($directory/AppRun --version 2>/dev/null)" || return 1
+  [[ "$output" =~ waywallen[[:space:]]+([^[:space:]]+) ]] || return 1
+  [[ "${BASH_REMATCH[1]}" == "${directory##*/}" ]] || return 1
+
+  printf '%s\n' "${BASH_REMATCH[1]}"
+}
+
+directory_is_in_use() {
+  local directory="$1"
+  local executable_link
+  local executable_path
+
+  for executable_link in /proc/[0-9]*/exe; do
+    executable_path="$(readlink -f -- "$executable_link" 2>/dev/null || true)"
+    if [[ "$executable_path" == "$directory/"* ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+prune_old_versions() {
+  local install_directory="$1"
+  local active_directory="$2"
+  local rollback_directory="$3"
+  local active_version="${active_directory##*/}"
+  local candidate
+  local candidate_version
+  local newest_version
+
+  for candidate in "$install_directory"/*; do
+    [[ "$candidate" != "$active_directory" && "$candidate" != "$rollback_directory" ]] ||
+      continue
+    candidate_version="$(waywallen_version_for_directory "$candidate")" || continue
+    newest_version="$(
+      printf '%s\n%s\n' "$candidate_version" "$active_version" | sort -V | tail -n 1
+    )"
+    [[ "$newest_version" == "$active_version" ]] || continue
+
+    if directory_is_in_use "$candidate"; then
+      printf 'Keeping in-use older version: %s\n' "$candidate"
+      continue
+    fi
+
+    printf 'Removing superseded Waywallen version: %s\n' "$candidate"
+    sudo rm -rf -- "$candidate"
+  done
+}
+
+for argument in "$@"; do
+  case "$argument" in
+    --check)
+      check_only=1
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+require_command curl
+require_command python
+require_command readlink
+require_command sha256sum
+require_command sort
+
+command_path="$(command -v waywallen 2>/dev/null || true)"
+[[ -n "$command_path" ]] || die "Waywallen is not installed"
+
+resolved_path="$(readlink -f -- "$command_path")"
+[[ "${resolved_path##*/}" == "AppRun" ]] ||
+  die "expected the Waywallen command to resolve to a versioned AppRun"
+
+current_dir="$(dirname -- "$resolved_path")"
+install_root="$(dirname -- "$current_dir")"
+[[ "$current_dir" != "/" && "$install_root" != "/" ]] ||
+  die "refusing an unsafe installation root"
+[[ -x "$current_dir/usr/bin/waywallen" ]] ||
+  die "the current AppImage extraction is incomplete: $current_dir"
+
+update_link="$(find_update_link "$command_path")" ||
+  die "the Waywallen command is not installed through a replaceable symlink"
+[[ "$(readlink -f -- "$update_link")" == "$resolved_path" ]] ||
+  die "the Waywallen symlink chain changed during inspection"
+
+version_output="$($resolved_path --version 2>&1)"
+if [[ "$version_output" =~ waywallen[[:space:]]+([^[:space:]]+) ]]; then
+  current_version="${BASH_REMATCH[1]}"
+else
+  die "could not determine the installed Waywallen version"
+fi
+
+case "$(uname -m)" in
+  x86_64 | amd64)
+    release_arch="x86_64"
+    ;;
+  aarch64 | arm64)
+    release_arch="aarch64"
+    ;;
+  *)
+    die "unsupported architecture: $(uname -m)"
+    ;;
+esac
+
+temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/waywallen-update.XXXXXX")"
+trap cleanup EXIT
+
+release_json="$temp_dir/release.json"
+curl --fail --silent --show-error --location --retry 3 \
+  --connect-timeout 15 --output "$release_json" "$RELEASE_API"
+
+mapfile -t release_fields < <(
+  python - "$release_json" "$release_arch" <<'PY'
+import json
+import sys
+
+path, architecture = sys.argv[1:]
+with open(path, encoding="utf-8") as stream:
+    release = json.load(stream)
+
+tag = release.get("tag_name", "")
+version = tag.removeprefix("v")
+suffix = f"-{architecture}.AppImage"
+assets = [
+    asset
+    for asset in release.get("assets", [])
+    if asset.get("name", "").startswith(f"waywallen-{version}-")
+    and asset.get("name", "").endswith(suffix)
+]
+if not version or len(assets) != 1:
+    raise SystemExit("latest release does not contain one matching AppImage")
+
+asset = assets[0]
+digest = asset.get("digest") or ""
+if not digest.startswith("sha256:"):
+    raise SystemExit("latest release does not publish a SHA-256 digest")
+
+print(version)
+print(asset["browser_download_url"])
+print(digest.removeprefix("sha256:"))
+PY
+)
+
+[[ "${#release_fields[@]}" -eq 3 ]] ||
+  die "could not read the latest Waywallen release metadata"
+latest_version="${release_fields[0]}"
+download_url="${release_fields[1]}"
+expected_sha256="${release_fields[2]}"
+
+printf 'Waywallen: %s installed, %s latest\n' "$current_version" "$latest_version"
+
+if [[ "$current_version" == "$latest_version" ]]; then
+  printf 'Waywallen is already up to date.\n'
+  exit 0
+fi
+
+highest_version="$(printf '%s\n%s\n' "$current_version" "$latest_version" | sort -V | tail -n 1)"
+if [[ "$highest_version" == "$current_version" ]]; then
+  printf 'The installed version is newer than the latest published release; leaving it unchanged.\n'
+  exit 0
+fi
+
+if [[ "$check_only" -eq 1 ]]; then
+  printf 'A Waywallen update is available.\n'
+  exit 0
+fi
+
+appimage_path="$temp_dir/waywallen-$latest_version-$release_arch.AppImage"
+printf 'Downloading Waywallen %s...\n' "$latest_version"
+curl --fail --show-error --location --retry 3 --connect-timeout 15 \
+  --output "$appimage_path" "$download_url"
+
+actual_sha256="$(sha256sum "$appimage_path" | awk '{print $1}')"
+[[ "$actual_sha256" == "$expected_sha256" ]] ||
+  die "downloaded AppImage failed SHA-256 verification"
+
+chmod u+x "$appimage_path"
+extract_dir="$temp_dir/extract"
+mkdir -p "$extract_dir"
+(
+  cd "$extract_dir"
+  "$appimage_path" --appimage-extract >/dev/null
+)
+
+source_tree="$extract_dir/squashfs-root"
+[[ -x "$source_tree/AppRun" && -x "$source_tree/usr/bin/waywallen" ]] ||
+  die "downloaded AppImage did not extract a complete application"
+
+extracted_version="$($source_tree/AppRun --version 2>&1)"
+[[ "$extracted_version" =~ waywallen[[:space:]]+([^[:space:]]+) ]] ||
+  die "could not determine the extracted Waywallen version"
+[[ "${BASH_REMATCH[1]}" == "$latest_version" ]] ||
+  die "extracted version does not match the release metadata"
+
+target_path="$install_root/$latest_version"
+if [[ -e "$target_path" ]]; then
+  die "target version directory already exists: $target_path"
+fi
+
+require_command sudo
+sudo install -d -m 0755 -- "$install_root"
+staging_path="$install_root/.$latest_version.new.$$"
+[[ ! -e "$staging_path" ]] || die "staging path already exists: $staging_path"
+sudo cp -a --no-preserve=ownership -- "$source_tree" "$staging_path"
+sudo mv -- "$staging_path" "$target_path"
+staging_path=""
+
+replacement_link="$update_link.new.$$"
+sudo ln -s -- "$target_path/AppRun" "$replacement_link"
+sudo mv -Tf -- "$replacement_link" "$update_link"
+replacement_link=""
+
+printf 'Installed Waywallen %s and kept %s for rollback.\n' \
+  "$latest_version" "$current_dir"
+
+if pgrep -u "$(id -u)" -x waywallen >/dev/null 2>&1; then
+  if command -v waywallen-toggle >/dev/null 2>&1; then
+    printf 'Restarting the active Waywallen session...\n'
+    waywallen-toggle off
+    for _ in {1..50}; do
+      pgrep -u "$(id -u)" -x waywallen >/dev/null 2>&1 || break
+      sleep 0.1
+    done
+    waywallen-toggle on
+
+    restarted=0
+    for _ in {1..50}; do
+      while IFS= read -r process_id; do
+        if [[ "$(readlink -f -- "/proc/$process_id/exe" 2>/dev/null || true)" == \
+          "$target_path/usr/bin/waywallen" ]]; then
+          restarted=1
+          break 2
+        fi
+      done < <(pgrep -u "$(id -u)" -x waywallen || true)
+      sleep 0.1
+    done
+    [[ "$restarted" -eq 1 ]] ||
+      die "the launcher was updated, but Waywallen did not restart successfully"
+  else
+    printf 'Waywallen is still running the old version; restart it to activate %s.\n' \
+      "$latest_version"
+  fi
+fi
+
+prune_old_versions "$install_root" "$target_path" "$current_dir"

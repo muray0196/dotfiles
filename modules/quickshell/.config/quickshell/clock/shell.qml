@@ -217,7 +217,7 @@ Scope {
             return false;
         radarRequestCycleEpochMs = cycleEpochMs;
         radarRequestAttemptOffsetSeconds = attemptOffsetSeconds;
-        radarIncludeAnimationFrames = observedWeatherIsRain();
+        radarIncludeAnimationFrames = radarRainDetected();
         radarUpdateReceived = false;
         radarResponseReferenceEpoch = 0;
         radarResponseHasForecast = false;
@@ -645,7 +645,11 @@ Scope {
     property double radarPendingReferenceEpoch: 0
     property double radarPendingCycleEpochMs: 0
     property int radarPendingAttemptOffsetSeconds: -1
+    property var radarPendingNearbyPrecipitation: null
     property double radarReferenceEpoch: 0
+    property bool radarNearbyPrecipitation: false
+    property int radarNearbyDrySamples: 0
+    property double radarNearbyLastSampleReferenceEpoch: 0
     property int radarFrameIndex: 0
     readonly property var radarActiveFrames: radarActiveSet === 0
         ? radarFrameSetA : radarActiveSet === 1 ? radarFrameSetB : []
@@ -673,6 +677,7 @@ Scope {
     readonly property int radarCycleDurationMs: 5 * 60 * 1000
     readonly property var radarAttemptOffsetsSeconds: [50, 110, 170, 230]
     readonly property int radarForecastEnrichmentOffsetSeconds: 170
+    readonly property int radarNearbyDryReleaseSamples: 2
     readonly property int radarMinimumViewportHeight: 192
     readonly property int radarViewportHeight: Math.max(
         radarMinimumViewportHeight,
@@ -883,7 +888,7 @@ Scope {
                     || typeof observation.humidity !== "number")
                 return;
 
-            const wasRaining = observedWeatherIsRain();
+            const radarWasActive = radarRainDetected();
             weatherObservedAt = observation.observed_at;
             weatherState = typeof observation.state === "string"
                 ? observation.state
@@ -909,7 +914,7 @@ Scope {
             weatherLastUpdateMs = Date.now();
             weatherFetchFailed = false;
             syncRadarAnimation(true);
-            if (wasRaining !== observedWeatherIsRain())
+            if (radarWasActive !== radarRainDetected())
                 requestRadarRefreshNow();
         } catch (error) {
             console.warn("Invalid Weathernews observation:", error);
@@ -924,6 +929,38 @@ Scope {
                 || weatherCondition.indexOf("雨") !== -1);
     }
 
+    function radarRainDetected() {
+        return observedWeatherIsRain() || radarNearbyPrecipitation;
+    }
+
+    function applyRadarNearbyPrecipitation(value, referenceEpoch) {
+        if (value === null
+                || referenceEpoch <= radarNearbyLastSampleReferenceEpoch)
+            return;
+
+        radarNearbyLastSampleReferenceEpoch = referenceEpoch;
+        const wasNearby = radarNearbyPrecipitation;
+        if (value) {
+            radarNearbyPrecipitation = true;
+            radarNearbyDrySamples = 0;
+        } else if (radarNearbyPrecipitation) {
+            radarNearbyDrySamples++;
+            if (radarNearbyDrySamples >= radarNearbyDryReleaseSamples) {
+                radarNearbyPrecipitation = false;
+                radarNearbyDrySamples = 0;
+            }
+        } else {
+            radarNearbyDrySamples = 0;
+        }
+
+        if (wasNearby !== radarNearbyPrecipitation) {
+            console.info(
+                "Rain radar nearby precipitation:",
+                radarNearbyPrecipitation ? "detected" : "clear"
+            );
+        }
+    }
+
     function currentRadarFrameIndex(frames) {
         for (let index = 0; index < frames.length; index++) {
             if (frames[index].offsetMinutes === 0)
@@ -934,7 +971,7 @@ Scope {
 
     function syncRadarAnimation(resetSequence) {
         const shouldAnimate = radarAvailable
-            && observedWeatherIsRain()
+            && radarRainDetected()
             && radarActiveFrames.length > 1;
 
         if (resetSequence || !shouldAnimate)
@@ -1002,6 +1039,8 @@ Scope {
                     || typeof radar.meters_per_pixel !== "number"
                     || typeof radar.radar_center_pixel_x !== "number"
                     || typeof radar.radar_center_pixel_y !== "number"
+                    || (radar.nearby_precipitation !== null
+                        && typeof radar.nearby_precipitation !== "boolean")
                     || !Array.isArray(radar.frames))
                 return;
 
@@ -1101,6 +1140,8 @@ Scope {
             radarPendingCycleEpochMs = radarRequestCycleEpochMs;
             radarPendingAttemptOffsetSeconds =
                 radarRequestAttemptOffsetSeconds;
+            radarPendingNearbyPrecipitation =
+                radar.nearby_precipitation;
             if (pendingSet === 0)
                 radarFrameSetA = pendingFrames;
             else
@@ -1126,6 +1167,10 @@ Scope {
             return;
 
         radarReferenceEpoch = radarPendingReferenceEpoch;
+        applyRadarNearbyPrecipitation(
+            radarPendingNearbyPrecipitation,
+            radarReferenceEpoch
+        );
         radarActiveSet = setIndex;
         if (setIndex === 0)
             radarFrameSetB = [];
@@ -1137,6 +1182,7 @@ Scope {
         radarPendingReferenceEpoch = 0;
         radarPendingCycleEpochMs = 0;
         radarPendingAttemptOffsetSeconds = -1;
+        radarPendingNearbyPrecipitation = null;
         radarAvailable = true;
         radarFetchFailed = false;
         syncRadarAnimation(true);
@@ -1156,6 +1202,7 @@ Scope {
         radarPendingReferenceEpoch = 0;
         radarPendingCycleEpochMs = 0;
         radarPendingAttemptOffsetSeconds = -1;
+        radarPendingNearbyPrecipitation = null;
         radarFetchFailed = true;
         radarRequestTileFailed = true;
         console.warn("Rain radar tile load failed; retrying");
@@ -2270,7 +2317,7 @@ Scope {
                             anchors.fill: parent
 
                             Repeater {
-                                model: [-10, 0, 10]
+                                model: [-5, 0, 5]
 
                                 delegate: Item {
                                     required property int index
@@ -2468,7 +2515,7 @@ Scope {
         interval: 1600
         repeat: true
         onTriggered: {
-            if (!shell.observedWeatherIsRain()
+            if (!shell.radarRainDetected()
                     || shell.radarActiveFrames.length <= 1) {
                 shell.syncRadarAnimation(false);
                 return;
