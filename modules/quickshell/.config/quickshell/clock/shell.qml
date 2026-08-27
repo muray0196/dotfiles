@@ -992,14 +992,6 @@ Scope {
         return "NOW";
     }
 
-    function radarFrameForOffset(offsetMinutes) {
-        for (const frame of radarActiveFrames) {
-            if (frame.offsetMinutes === offsetMinutes)
-                return frame;
-        }
-        return null;
-    }
-
     function radarFramesAddInformation(candidateFrames, existingFrames) {
         for (const candidate of candidateFrames) {
             let alreadyPresent = false;
@@ -2284,19 +2276,9 @@ Scope {
                             right: parent.right
                         }
                         visible: shell.radarAvailable
-                        height: 22
+                        height: 6
                         color: theme.radarTelemetryBackground
                         z: 2
-
-                        Rectangle {
-                            anchors {
-                                left: parent.left
-                                right: parent.right
-                                bottom: parent.bottom
-                            }
-                            height: 1
-                            color: theme.radarGrid
-                        }
 
                         Row {
                             id: radarTimelineSegments
@@ -2313,50 +2295,23 @@ Scope {
                                     width: radarTimelineSegments.width / 3
                                     height: radarTimelineSegments.height
 
-                                    readonly property var frameData:
-                                        shell.radarFrameForOffset(modelData)
-                                    readonly property bool available:
-                                        frameData !== null
-                                    readonly property string label:
-                                        shell.radarTimeframeLabelForOffset(
-                                            modelData
-                                        )
                                     readonly property bool active:
                                         shell.radarDisplayedFrame !== null
                                             && shell.radarDisplayedFrame
                                                 .offsetMinutes === modelData
 
                                     Rectangle {
-                                        anchors.fill: parent
-                                        anchors.margins: 2
-                                        color: parent.active
-                                            ? theme.textPrimary
-                                            : "transparent"
-                                    }
-
-                                    Rectangle {
                                         anchors {
+                                            left: parent.left
                                             right: parent.right
                                             verticalCenter: parent.verticalCenter
+                                            leftMargin: 2
+                                            rightMargin: 2
                                         }
-                                        visible: index < 2
-                                        width: 1
-                                        height: parent.height - 10
-                                        color: theme.radarGrid
-                                    }
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: parent.label
+                                        height: 2
                                         color: parent.active
-                                            ? theme.radarBackground
-                                            : parent.available
-                                                ? theme.textSecondary
-                                                : theme.textDisabled
-                                        font.family: "Adwaita Mono"
-                                        font.pixelSize: 9
-                                        font.weight: parent.active
-                                            ? Font.Bold : Font.Medium
+                                            ? theme.textPrimary
+                                            : theme.radarGrid
                                     }
                                 }
                             }
