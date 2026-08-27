@@ -648,7 +648,6 @@ Scope {
     property var radarPendingNearbyPrecipitation: null
     property double radarReferenceEpoch: 0
     property bool radarNearbyPrecipitation: false
-    property int radarNearbyDrySamples: 0
     property double radarNearbyLastSampleReferenceEpoch: 0
     property int radarFrameIndex: 0
     readonly property var radarActiveFrames: radarActiveSet === 0
@@ -677,7 +676,6 @@ Scope {
     readonly property int radarCycleDurationMs: 5 * 60 * 1000
     readonly property var radarAttemptOffsetsSeconds: [50, 110, 170, 230]
     readonly property int radarForecastEnrichmentOffsetSeconds: 170
-    readonly property int radarNearbyDryReleaseSamples: 2
     readonly property int radarMinimumViewportHeight: 192
     readonly property int radarViewportHeight: Math.max(
         radarMinimumViewportHeight,
@@ -934,29 +932,18 @@ Scope {
     }
 
     function applyRadarNearbyPrecipitation(value, referenceEpoch) {
-        if (value === null
-                || referenceEpoch <= radarNearbyLastSampleReferenceEpoch)
+        if (referenceEpoch <= radarNearbyLastSampleReferenceEpoch)
             return;
 
         radarNearbyLastSampleReferenceEpoch = referenceEpoch;
         const wasNearby = radarNearbyPrecipitation;
-        if (value) {
-            radarNearbyPrecipitation = true;
-            radarNearbyDrySamples = 0;
-        } else if (radarNearbyPrecipitation) {
-            radarNearbyDrySamples++;
-            if (radarNearbyDrySamples >= radarNearbyDryReleaseSamples) {
-                radarNearbyPrecipitation = false;
-                radarNearbyDrySamples = 0;
-            }
-        } else {
-            radarNearbyDrySamples = 0;
-        }
+        radarNearbyPrecipitation = value === true;
 
         if (wasNearby !== radarNearbyPrecipitation) {
             console.info(
                 "Rain radar nearby precipitation:",
-                radarNearbyPrecipitation ? "detected" : "clear"
+                radarNearbyPrecipitation ? "detected"
+                    : value === false ? "clear" : "cleared (unavailable)"
             );
         }
     }

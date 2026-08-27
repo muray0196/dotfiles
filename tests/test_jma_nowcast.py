@@ -59,6 +59,23 @@ def indexed_png(rows: list[list[int]]) -> bytes:
     )
 
 
+def rgba_png(alpha_rows: list[list[int]]) -> bytes:
+    height = len(alpha_rows)
+    width = len(alpha_rows[0])
+    raw_rows = []
+    for alpha_row in alpha_rows:
+        pixels = b"".join(bytes((0, 0, 0, alpha)) for alpha in alpha_row)
+        raw_rows.append(b"\x00" + pixels)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (
+        jma_nowcast.PNG_SIGNATURE
+        + png_chunk(b"IHDR", header)
+        + png_chunk(b"IDAT", zlib.compress(b"".join(raw_rows)))
+        + png_chunk(b"IEND", b"")
+    )
+
+
 def radar_rows(opaque_pixels: set[tuple[int, int]]) -> list[list[int]]:
     rows = [[1] * 256 for _ in range(256)]
     for x, y in opaque_pixels:
@@ -66,14 +83,22 @@ def radar_rows(opaque_pixels: set[tuple[int, int]]) -> list[list[int]]:
     return rows
 
 
-class IndexedPngTests(unittest.TestCase):
+class PngAlphaTests(unittest.TestCase):
     def test_decodes_transparent_and_opaque_palette_entries(self) -> None:
         png = indexed_png([[0, 1, 2, 1]])
 
-        width, height, alpha_rows = jma_nowcast.decode_indexed_png_alpha(png)
+        width, height, alpha_rows = jma_nowcast.decode_png_alpha(png)
 
         self.assertEqual((width, height), (4, 1))
         self.assertEqual(alpha_rows, [b"\x00\x00\xff\x00"])
+
+    def test_decodes_transparent_rgba_tiles(self) -> None:
+        png = rgba_png([[0, 0], [0, 255]])
+
+        width, height, alpha_rows = jma_nowcast.decode_png_alpha(png)
+
+        self.assertEqual((width, height), (2, 2))
+        self.assertEqual(alpha_rows, [b"\x00\x00", b"\x00\xff"])
 
 
 class NearbyPrecipitationTests(unittest.TestCase):
@@ -113,6 +138,21 @@ class NearbyPrecipitationTests(unittest.TestCase):
         }
 
         self.assertFalse(self.detect(outside_cluster))
+
+    def test_accepts_transparent_rgba_tile_as_dry(self) -> None:
+        png = rgba_png([[0] * 256 for _ in range(256)])
+
+        detected = jma_nowcast.frame_has_nearby_precipitation(
+            self.frame,
+            center_pixel_x=128,
+            center_pixel_y=128,
+            tile_size=256,
+            source_pixel_meters=100,
+            timeout=1,
+            tile_loader=lambda _url, _timeout: png,
+        )
+
+        self.assertFalse(detected)
 
     def test_uses_only_current_frame_for_detection(self) -> None:
         dry_png = indexed_png(radar_rows(set()))

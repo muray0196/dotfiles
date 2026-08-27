@@ -222,8 +222,8 @@ def download_radar_tile(url: str, timeout: float) -> bytes:
     return data
 
 
-def decode_indexed_png_alpha(data: bytes) -> tuple[int, int, list[bytes]]:
-    """Decode alpha values from a non-interlaced indexed PNG."""
+def decode_png_alpha(data: bytes) -> tuple[int, int, list[bytes]]:
+    """Decode alpha values from a supported non-interlaced radar PNG."""
     if not data.startswith(PNG_SIGNATURE):
         raise ValueError("radar tile is not a PNG")
 
@@ -267,18 +267,24 @@ def decode_indexed_png_alpha(data: bytes) -> tuple[int, int, list[bytes]]:
     )
     if width < 1 or height < 1:
         raise ValueError("radar PNG has invalid dimensions")
+    indexed = color_type == 3 and bit_depth in (1, 2, 4, 8)
+    rgba = color_type == 6 and bit_depth == 8
     if (
-        color_type != 3
-        or bit_depth not in (1, 2, 4, 8)
+        not (indexed or rgba)
         or compression != 0
         or filtering != 0
         or interlace != 0
     ):
         raise ValueError("radar PNG uses an unsupported format")
-    if palette_entries < 1 or transparency is None:
+    if indexed and (palette_entries < 1 or transparency is None):
         raise ValueError("radar PNG has no transparent indexed palette")
 
-    row_bytes = (width * bit_depth + 7) // 8
+    bytes_per_pixel = 1 if indexed else 4
+    row_bytes = (
+        (width * bit_depth + 7) // 8
+        if indexed
+        else width * bytes_per_pixel
+    )
     try:
         raw = zlib.decompress(b"".join(image_data))
     except zlib.error as error:
@@ -289,8 +295,8 @@ def decode_indexed_png_alpha(data: bytes) -> tuple[int, int, list[bytes]]:
     rows: list[bytes] = []
     previous = bytearray(row_bytes)
     raw_offset = 0
-    pixels_per_byte = 8 // bit_depth
-    index_mask = (1 << bit_depth) - 1
+    pixels_per_byte = 8 // bit_depth if indexed else 0
+    index_mask = (1 << bit_depth) - 1 if indexed else 0
 
     for _ in range(height):
         filter_type = raw[raw_offset]
@@ -300,9 +306,17 @@ def decode_indexed_png_alpha(data: bytes) -> tuple[int, int, list[bytes]]:
         decoded = bytearray(row_bytes)
 
         for index, value in enumerate(scanline):
-            left = decoded[index - 1] if index > 0 else 0
+            left = (
+                decoded[index - bytes_per_pixel]
+                if index >= bytes_per_pixel
+                else 0
+            )
             above = previous[index]
-            upper_left = previous[index - 1] if index > 0 else 0
+            upper_left = (
+                previous[index - bytes_per_pixel]
+                if index >= bytes_per_pixel
+                else 0
+            )
             if filter_type == 0:
                 predictor = 0
             elif filter_type == 1:
@@ -328,19 +342,24 @@ def decode_indexed_png_alpha(data: bytes) -> tuple[int, int, list[bytes]]:
                 raise ValueError("radar PNG uses an invalid row filter")
             decoded[index] = (value + predictor) & 0xFF
 
-        alpha = bytearray(width)
-        for pixel in range(width):
-            packed = decoded[pixel // pixels_per_byte]
-            shift = 8 - bit_depth * (pixel % pixels_per_byte + 1)
-            palette_index = (packed >> shift) & index_mask
-            if palette_index >= palette_entries:
-                raise ValueError("radar PNG references an invalid palette entry")
-            alpha[pixel] = (
-                transparency[palette_index]
-                if palette_index < len(transparency)
-                else 255
-            )
-        rows.append(bytes(alpha))
+        if indexed:
+            alpha = bytearray(width)
+            for pixel in range(width):
+                packed = decoded[pixel // pixels_per_byte]
+                shift = 8 - bit_depth * (pixel % pixels_per_byte + 1)
+                palette_index = (packed >> shift) & index_mask
+                if palette_index >= palette_entries:
+                    raise ValueError(
+                        "radar PNG references an invalid palette entry"
+                    )
+                alpha[pixel] = (
+                    transparency[palette_index]
+                    if palette_index < len(transparency)
+                    else 255
+                )
+            rows.append(bytes(alpha))
+        else:
+            rows.append(bytes(decoded[3::4]))
         previous = decoded
 
     return width, height, rows
@@ -382,7 +401,7 @@ def frame_has_nearby_precipitation(
             continue
 
         intersecting_tiles += 1
-        width, height, alpha_rows = decode_indexed_png_alpha(
+        width, height, alpha_rows = decode_png_alpha(
             tile_loader(tile["url"], timeout)
         )
         if width != tile_size or height != tile_size:
