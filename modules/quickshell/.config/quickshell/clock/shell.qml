@@ -674,7 +674,7 @@ Scope {
     property int radarScheduledAttemptOffsetSeconds: 50
     property double radarLastLoggedReferenceEpoch: 0
     readonly property int radarCycleDurationMs: 5 * 60 * 1000
-    readonly property var radarAttemptOffsetsSeconds: [50, 80, 110, 140]
+    readonly property var radarAttemptOffsetsSeconds: [50, 110, 170]
     readonly property int radarForecastEnrichmentOffsetSeconds: 170
     readonly property int radarMinimumViewportHeight: 192
     readonly property int radarViewportHeight: Math.max(

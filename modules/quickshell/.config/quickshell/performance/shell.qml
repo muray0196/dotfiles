@@ -24,8 +24,10 @@ Scope {
     readonly property int moduleDividerHeight: 7
     readonly property int panelInset: 10
     readonly property int pollIntervalSeconds: 2
-    readonly property int historySampleIntervalMs: 5000
-    readonly property int historySampleCapacity: 120
+    readonly property int historySampleIntervalMs:
+        pollIntervalSeconds * 1000
+    readonly property int historySampleCapacity:
+        600000 / historySampleIntervalMs
     readonly property int performancePanelGap: 10
     readonly property int freshnessCautionMs: 6000
     readonly property int freshnessErrorMs: 30000
@@ -216,6 +218,8 @@ Scope {
                 && !target.vramAvailable;
             target.lastUpdateMs = receivedAt;
             target.available = true;
+            // Keep the current reading inside the advertised peak window.
+            historyStore.capture(localData, remoteData, receivedAt);
         } catch (error) {
             console.warn("Invalid system metrics:", error);
         }
@@ -2317,6 +2321,7 @@ Scope {
         }
     }
 
+    // Continue advancing the timeline when either collector stops producing.
     Timer {
         interval: shell.historySampleIntervalMs
         running: true
