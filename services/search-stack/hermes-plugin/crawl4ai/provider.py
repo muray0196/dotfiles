@@ -20,6 +20,9 @@ _MARKDOWN_RESPONSE_BYTES = 4 * 1024 * 1024
 _HTML_RESPONSE_BYTES = 8 * 1024 * 1024
 _NORMAL_SEARCH_CONTEXT_CHARS = 6000
 _ADVANCED_SEARCH_CONTEXT_CHARS = 18000
+_CAPITALIZED_PHRASE_RE = re.compile(
+    r'(?<![\w"])([A-Z][\w.+-]*(?:\s+[A-Z][\w.+-]*)+)'
+)
 
 
 def _read_env_value(path: Path, name: str) -> str:
@@ -86,6 +89,22 @@ def _canonical_url(value: Any) -> str:
     return urlunsplit(
         (parsed.scheme.lower(), parsed.netloc, parsed.path or "/", parsed.query, "")
     )
+
+
+def _prioritize_named_phrase(query: str) -> str:
+    """Move the first two-word capitalized phrase to the front for Bing."""
+    def prioritize(match: re.Match[str]) -> str:
+        words = match.group(1).split()
+        if len(words) < 2:
+            return match.group(1)
+        phrase = f"{words[0]} {words[1]}"
+        remainder = " ".join(words[2:])
+        before = query[: match.start()].strip()
+        after = query[match.end() :].strip()
+        return " ".join(part for part in (phrase, before, remainder, after) if part)
+
+    match = _CAPITALIZED_PHRASE_RE.search(query)
+    return prioritize(match) if match else query
 
 
 def _log_host(value: Any) -> str:
@@ -166,7 +185,7 @@ class FastSearXNGWebSearchProvider(WebSearchProvider):
         self,
         *,
         base_url: str,
-        engines: str = "google cse",
+        engines: str = "bing",
         snippet_char_limit: int = 360,
         timeout_seconds: float = 3.0,
         http_client: Any = None,
@@ -211,12 +230,16 @@ class FastSearXNGWebSearchProvider(WebSearchProvider):
         except (TypeError, ValueError):
             requested_limit = 5
         # Hermes asks providers for a bucket of ten even when the model asked
-        # for three. Keep normal searches at three; explicit SearX bangs are
-        # the escape hatch used by web_research and intentional engine picks.
+        # for three. Keep normal searches at three; explicit SearX bangs remain
+        # an intentional engine-selection escape hatch.
         result_limit = requested_limit if advanced else min(requested_limit, 3)
 
         params: Dict[str, Any] = {
-            "q": clean_query,
+            "q": (
+                _prioritize_named_phrase(clean_query)
+                if not advanced and self._engines == "bing"
+                else clean_query
+            ),
             "format": "json",
             "pageno": 1,
             "timeout_limit": self._timeout_seconds,

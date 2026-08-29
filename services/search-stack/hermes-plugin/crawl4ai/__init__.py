@@ -10,14 +10,19 @@ from .provider import (
     Crawl4AIWebSearchProvider,
     FastSearXNGWebSearchProvider,
 )
-from .tools import register_tools
+from .tools import (
+    build_extract_limit_middleware,
+    build_extract_result_limiter,
+    build_search_context_middleware,
+    register_tools,
+)
 
 
 _WEB_RETRIEVAL_POLICY = """Web retrieval:
-- Ordinary/current lookup: use web_search with limit 3. Treat snippets as sufficient unless exact verification needs page content.
-- If needed, web_open one selected URL; use two only to corroborate.
-- Use web_research only for explicit deep/exhaustive requests, high-stakes claims, or insufficient/conflicting quick evidence. It includes search; do not pre-search.
-- Prefer web_open to web_extract. Load deferred tools through tool_search.
+- Ordinary lookup: use web_search with limit 3. SearXNG discovers URLs; Crawl4AI concurrently returns bounded relevant page passages.
+- For deep/thorough/exhaustive/しっかり/深く/multi-source requests, run up to three focused web_search queries. Each result is already Crawl4AI-optimized.
+- For exact verification after search, invoke deferred web_open through tool_call; use two URLs only to corroborate.
+- Never call direct web_extract; it is blocked for context safety.
 """
 
 
@@ -46,7 +51,7 @@ def register(ctx) -> None:
 
     search_provider = FastSearXNGWebSearchProvider(
         base_url=str(searxng_url),
-        engines=str(ctx.get_config("fast_engines", default="google cse")),
+        engines=str(ctx.get_config("fast_engines", default="bing")),
         snippet_char_limit=int(
             _number_setting(ctx, "snippet_char_limit", 360, 120, 800)
         ),
@@ -71,16 +76,36 @@ def register(ctx) -> None:
     ctx.register_web_search_provider(legacy_extract_provider)
     ctx.on_unload(search_provider.close)
     ctx.on_unload(crawl_client.close)
+    extract_char_limit = int(
+        _number_setting(ctx, "extract_char_limit", 4000, 2000, 20000)
+    )
+    ctx.register_middleware(
+        "tool_request",
+        build_extract_limit_middleware(extract_char_limit),
+    )
+    ctx.register_middleware(
+        "tool_execution",
+        build_search_context_middleware(
+            ctx.dispatch_tool,
+            max_results=int(
+                _number_setting(ctx, "search_result_limit", 3, 1, 5)
+            ),
+            total_chars=int(
+                _number_setting(ctx, "search_context_limit", 3600, 1200, 8000)
+            ),
+        ),
+    )
+    ctx.register_hook(
+        "transform_tool_result",
+        build_extract_result_limiter(extract_char_limit),
+    )
     register_tools(
         ctx,
         open_available=extract_provider.is_available,
-        research_available=lambda: (
-            search_provider.is_available() and extract_provider.is_available()
-        ),
     )
     ctx.register_system_prompt_section(
         "local-web.retrieval-policy",
         _WEB_RETRIEVAL_POLICY,
         position="after_memory",
-        max_chars=600,
+        max_chars=900,
     )

@@ -43,36 +43,45 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 
 base_url = sys.argv[1].rstrip("/")
-engine_name = "google cse"
+fast_engine = "bing"
 with urlopen(f"{base_url}/config", timeout=5) as response:
     config = json.load(response)
-if not any(
-    isinstance(engine, dict) and engine.get("name") == engine_name
+loaded_engines = {
+    engine.get("name")
     for engine in config.get("engines", [])
-):
+    if isinstance(engine, dict)
+}
+missing = {fast_engine} - loaded_engines
+if missing:
     raise SystemExit(
-        "SearXNG fast engine is not loaded; run setup-search-stack.sh first"
+        f"SearXNG required engines are not loaded: {', '.join(sorted(missing))}"
     )
 
-params = urlencode(
-    {
-        "q": "Example Domain",
-        "format": "json",
-        "engines": engine_name,
-    }
-)
-with urlopen(f"{base_url}/search?{params}", timeout=10) as response:
-    search = json.load(response)
-results = search.get("results", [])
-if not results:
-    raise SystemExit("SearXNG fast engine returned no preflight results")
-if len(results) > 3:
-    raise SystemExit("SearXNG fast engine exceeded its three-result page size")
-for result in results:
-    engines = result.get("engines", []) if isinstance(result, dict) else []
-    engine = result.get("engine") if isinstance(result, dict) else None
-    if engine_name != engine and engine_name not in engines:
-        raise SystemExit("SearXNG fast engine preflight returned another engine")
+
+def search_engine(engine_name):
+    params = urlencode(
+        {
+            "q": "Example Domain",
+            "format": "json",
+            "engines": engine_name,
+        }
+    )
+    with urlopen(f"{base_url}/search?{params}", timeout=10) as response:
+        search = json.load(response)
+    return search.get("results", [])
+
+
+fast_results = search_engine(fast_engine)
+if not fast_results:
+    raise SystemExit("SearXNG Bing fast engine returned no preflight results")
+for engine_name, results in ((fast_engine, fast_results),):
+    for result in results:
+        engines = result.get("engines", []) if isinstance(result, dict) else []
+        engine = result.get("engine") if isinstance(result, dict) else None
+        if engine_name != engine and engine_name not in engines:
+            raise SystemExit(
+                f"SearXNG {engine_name} preflight returned another engine"
+            )
 PY
 
 plugin_parent="$(dirname -- "$plugin_target")"
@@ -211,7 +220,10 @@ hermes plugins doctor --ci "$plugin_target"
 hermes plugins enable web/crawl4ai --no-allow-tool-override
 hermes config set --force plugins.entries.web/crawl4ai.settings.base_url "http://127.0.0.1:11235"
 hermes config set --force plugins.entries.web/crawl4ai.settings.searxng_url "http://127.0.0.1:$searxng_host_port"
-hermes config set --force plugins.entries.web/crawl4ai.settings.fast_engines "google cse"
+hermes config set --force plugins.entries.web/crawl4ai.settings.fast_engines "bing"
+hermes config set --force plugins.entries.web/crawl4ai.settings.extract_char_limit 4000
+hermes config set --force plugins.entries.web/crawl4ai.settings.search_result_limit 3
+hermes config set --force plugins.entries.web/crawl4ai.settings.search_context_limit 3600
 hermes config set --force plugins.entries.web/crawl4ai.settings.env_file "$STACK_DIR/.env"
 
 hermes plugins doctor --ci web/crawl4ai
@@ -236,4 +248,4 @@ fi
 # Remove config.yaml forms written by older versions of this setup script.
 hermes config unset SEARXNG_URL >/dev/null 2>&1 || true
 hermes config unset plugins.entries.web-crawl4ai >/dev/null 2>&1 || true
-info "Hermes uses fast SearXNG search and bounded Crawl4AI retrieval"
+info "Hermes uses fast SearXNG discovery with bounded Crawl4AI context"

@@ -7,10 +7,7 @@ import json
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextvars import copy_context
-from typing import Any, Dict, Iterable, List, Sequence, Tuple
-from urllib.parse import urlsplit, urlunsplit
+from typing import Any, Dict, List, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +17,47 @@ _CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]+")
 
 _OPEN_INNER_CHARS = 20000
 _OPEN_OUTPUT_CHARS = 4000
-_RESEARCH_INNER_CHARS = 20000
-_RESEARCH_TOTAL_CHARS = 14000
-_RESEARCH_PER_SOURCE_CHARS = 4000
+_SEARCH_INNER_CHARS = 12000
+_SEARCH_RESULT_CHARS = 1200
+_SEARCH_TOTAL_CHARS = 3600
+
+_QUERY_STOP_WORDS = frozenset(
+    {
+        "a",
+        "about",
+        "an",
+        "and",
+        "are",
+        "be",
+        "been",
+        "being",
+        "by",
+        "for",
+        "from",
+        "how",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "these",
+        "this",
+        "those",
+        "to",
+        "was",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "with",
+    }
+)
 
 
 WEB_OPEN_SCHEMA = {
@@ -30,8 +65,8 @@ WEB_OPEN_SCHEMA = {
     "description": (
         "Open one web result when search snippets are insufficient for an exact "
         "answer or verification. Accepts at most two URLs and returns only the "
-        "most relevant bounded passages. Do not use merely because search results "
-        "contain URLs."
+        "most relevant bounded passages. Use this instead of direct web_extract. "
+        "Do not use merely because search results contain URLs."
     ),
     "parameters": {
         "type": "object",
@@ -55,48 +90,265 @@ WEB_OPEN_SCHEMA = {
 }
 
 
-WEB_RESEARCH_SCHEMA = {
-    "name": "web_research",
-    "description": (
-        "Run bounded multi-source research in one call: search, deduplicate, "
-        "diversify domains, open pages concurrently, and return relevant evidence. "
-        "Use only for explicit deep/exhaustive research, high-stakes verification, "
-        "or when quick search evidence is insufficient or conflicting."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "maxLength": 1000,
-                "description": "Primary research question or search query.",
-            },
-            "additional_queries": {
-                "type": "array",
-                "items": {"type": "string", "maxLength": 1000},
-                "maxItems": 2,
-                "description": "Optional alternate queries or explicit SearX bangs.",
-                "default": [],
-            },
-            "max_sources": {
-                "type": "integer",
-                "minimum": 2,
-                "maximum": 5,
-                "default": 4,
-                "description": "Maximum independently selected sources; defaults to 4.",
-            },
-        },
-        "required": ["query"],
-        "additionalProperties": False,
-    },
-}
-
-
 def _clean_inline(value: Any, limit: int) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def build_extract_limit_middleware(limit: int):
+    """Clamp model-issued web_extract calls to the configured context budget."""
+    hard_limit = max(2000, min(int(limit), 20000))
+
+    def clamp_request(**kwargs: Any) -> Dict[str, Any] | None:
+        if kwargs.get("tool_name") != "web_extract":
+            return None
+        args = kwargs.get("args")
+        if not isinstance(args, dict):
+            return None
+        try:
+            requested = int(args.get("char_limit", hard_limit))
+        except (TypeError, ValueError):
+            requested = hard_limit
+        effective = min(requested, hard_limit)
+        if args.get("char_limit") == effective:
+            return None
+        return {
+            "args": {**args, "char_limit": effective},
+            "source": "web/crawl4ai",
+            "reason": "bounded web_extract context",
+        }
+
+    return clamp_request
+
+
+def build_extract_result_limiter(limit: int):
+    """Keep final model-facing web_extract page content within the hard limit."""
+    hard_limit = max(2000, min(int(limit), 20000))
+
+    def limit_result(**kwargs: Any) -> str | None:
+        if kwargs.get("tool_name") != "web_extract":
+            return None
+        raw = kwargs.get("result")
+        if not isinstance(raw, str):
+            return None
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        results = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(results, list):
+            return None
+        changed = False
+        for item in results:
+            if not isinstance(item, dict) or not isinstance(item.get("content"), str):
+                continue
+            without_footer = _strip_truncation_footer(item["content"])
+            bounded = _head_tail(without_footer, hard_limit)
+            if bounded != item["content"]:
+                item["content"] = bounded
+                changed = True
+        if not changed:
+            return None
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    return limit_result
+
+
+def build_search_context_middleware(
+    dispatch_tool: Any,
+    *,
+    max_results: int = 3,
+    total_chars: int = _SEARCH_TOTAL_CHARS,
+):
+    """Replace model-facing SearXNG snippets with Crawl4AI page passages.
+
+    The nested extraction goes through Hermes' core ``web_extract`` handler so
+    URL safety, site policy, and its correctly keyed extraction cache remain in
+    force. Plugin-internal extraction calls bypass execution middleware, while
+    direct model-issued ``web_extract`` calls fail closed.
+    """
+    result_limit = max(1, min(int(max_results), 5))
+    context_limit = max(1200, min(int(total_chars), 8000))
+
+    def optimize_result(**kwargs: Any) -> Any:
+        args = kwargs.get("args")
+        next_call = kwargs.get("next_call")
+        if not callable(next_call):
+            raise TypeError("tool_execution middleware requires next_call")
+        tool_name = kwargs.get("tool_name")
+        if tool_name == "web_extract":
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": (
+                        "Direct web_extract is disabled for context safety. Use "
+                        "Crawl4AI-optimized web_search results, or tool_call with "
+                        "web_open when one page needs exact verification."
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        is_search = tool_name == "web_search"
+        downstream_args = args
+        if is_search and isinstance(args, dict):
+            downstream_args = {**args, "limit": result_limit}
+        raw = next_call(downstream_args)
+        if not is_search:
+            return raw
+
+        started = time.monotonic()
+        query = _clean_inline(args.get("query"), 1000) if isinstance(args, dict) else ""
+        try:
+            payload = _parse_tool_result(raw)
+            if payload.get("error") or payload.get("success") is False:
+                return raw
+            data = payload.get("data")
+            web_results = data.get("web") if isinstance(data, dict) else None
+            if not isinstance(web_results, list) or not web_results:
+                return raw
+
+            candidates = []
+            for item in web_results:
+                if not isinstance(item, dict) or not item.get("url"):
+                    continue
+                if not _candidate_relevance_score(item, query):
+                    continue
+                candidates.append(item)
+                if len(candidates) >= result_limit:
+                    break
+            if not candidates:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": (
+                            "SearXNG returned no sufficiently relevant URLs for "
+                            "Crawl4AI optimization"
+                        ),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+
+            extract_payload = _parse_tool_result(
+                dispatch_tool(
+                    "web_extract",
+                    {
+                        "urls": [item["url"] for item in candidates],
+                        "char_limit": _SEARCH_INNER_CHARS,
+                    },
+                )
+            )
+            extracted = extract_payload.get("results")
+            if not isinstance(extracted, list):
+                extracted = []
+
+            usable: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+            crawl_errors: List[str] = []
+            for index, candidate in enumerate(candidates):
+                item = (
+                    extracted[index]
+                    if index < len(extracted) and isinstance(extracted[index], dict)
+                    else {}
+                )
+                if item.get("content"):
+                    usable.append((candidate, item))
+                elif item.get("error"):
+                    crawl_errors.append(_clean_inline(item["error"], 240))
+
+            if not usable:
+                reason = extract_payload.get("error")
+                if not reason and crawl_errors:
+                    reason = crawl_errors[0]
+                detail = f": {_clean_inline(reason, 300)}" if reason else ""
+                logger.warning(
+                    "web_search Crawl4AI context optimization failed: results=%d%s",
+                    len(candidates),
+                    detail,
+                )
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": (
+                            "SearXNG found results, but Crawl4AI could not produce "
+                            f"optimized context{detail}"
+                        ),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+
+            optimized: List[Dict[str, Any]] = []
+            remaining = context_limit
+            for index, (candidate, item) in enumerate(usable):
+                sources_left = len(usable) - index
+                passage_limit = min(
+                    _SEARCH_RESULT_CHARS,
+                    remaining // max(1, sources_left),
+                )
+                passage = _select_passages(
+                    item.get("content"), query, max(0, passage_limit)
+                )
+                if not passage:
+                    continue
+                remaining = max(0, remaining - len(passage))
+                optimized.append(
+                    {
+                        "title": _clean_inline(
+                            candidate.get("title") or item.get("title"), 240
+                        ),
+                        "url": _clean_inline(
+                            item.get("url") or candidate.get("url"), 2048
+                        ),
+                        "description": passage,
+                        "position": len(optimized) + 1,
+                    }
+                )
+
+            if not optimized:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "Crawl4AI returned pages but no usable optimized context",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+
+            optimized_payload = copy.deepcopy(payload)
+            optimized_data = optimized_payload.setdefault("data", {})
+            optimized_data["web"] = optimized
+            optimized_data["context_optimized_by"] = "crawl4ai"
+            returned_chars = sum(len(item["description"]) for item in optimized)
+            logger.info(
+                "web_search Crawl4AI context: results=%d elapsed_ms=%d chars=%d",
+                len(optimized),
+                round((time.monotonic() - started) * 1000),
+                returned_chars,
+            )
+            return json.dumps(optimized_payload, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            # Once SearXNG has succeeded, never fail open to its raw snippets:
+            # the model-facing contract requires Crawl4AI-optimized context.
+            logger.warning(
+                "web_search Crawl4AI context middleware failed: %s",
+                _clean_inline(exc, 300),
+            )
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": (
+                        "Crawl4AI context optimization failed: "
+                        f"{_clean_inline(exc, 300)}"
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+    return optimize_result
 
 
 def _error_result(message: Any, source: str = "web") -> str:
@@ -154,6 +406,31 @@ def _query_terms(query: str) -> List[str]:
     return sorted(terms, key=len, reverse=True)[:32]
 
 
+def _meaningful_query_terms(query: str) -> List[str]:
+    without_bangs = _BANG_RE.sub(" ", query)
+    return [
+        term
+        for term in _query_terms(without_bangs)
+        if term not in _QUERY_STOP_WORDS
+    ]
+
+
+def _candidate_relevance_score(candidate: Dict[str, Any], query: str) -> int:
+    terms = _meaningful_query_terms(query)
+    if not terms:
+        return 1
+    title = str(candidate.get("title") or "").casefold()
+    description = str(candidate.get("description") or "").casefold()
+    url = str(candidate.get("url") or "").casefold()
+    combined = f"{title}\n{description}\n{url}"
+    matched = {term for term in terms if term in combined}
+    required = 1 if len(terms) == 1 else 2
+    if len(matched) < required:
+        return 0
+    title_matches = sum(1 for term in matched if term in title)
+    return len(matched) + (title_matches * 2)
+
+
 def _head_tail(text: str, limit: int) -> str:
     clean = str(text or "").strip()
     if limit <= 0:
@@ -168,6 +445,15 @@ def _head_tail(text: str, limit: int) -> str:
     tail = available - head
     tail_text = clean[-tail:].lstrip() if tail else ""
     return clean[:head].rstrip() + marker + tail_text
+
+
+def _strip_truncation_footer(text: Any) -> str:
+    """Remove Hermes cache/spillover pointers from model-facing page content."""
+    return re.sub(
+        r"\n(?:─{8}|-{8})\s*\[TRUNCATED\]\s*(?:─{8}|-{8})[\s\S]*$",
+        "",
+        str(text or ""),
+    ).strip()
 
 
 def _bound_payload(payload: Dict[str, Any], max_chars: int) -> Dict[str, Any]:
@@ -256,11 +542,7 @@ def _bound_payload(payload: Dict[str, Any], max_chars: int) -> Dict[str, Any]:
 
 
 def _select_passages(text: Any, query: str, limit: int) -> str:
-    markdown = re.sub(
-        r"\n─{8} \[TRUNCATED\] ─{8}[\s\S]*$",
-        "",
-        str(text or ""),
-    ).strip()
+    markdown = _strip_truncation_footer(text)
     if len(markdown) <= limit:
         return markdown
 
@@ -295,61 +577,6 @@ def _select_passages(text: Any, query: str, limit: int) -> str:
 
     selected = "\n\n".join(blocks[index] for index in sorted(chosen))
     return _head_tail(selected or markdown, limit)
-
-
-def _canonical_url(value: Any) -> str:
-    raw = str(value or "").strip()
-    try:
-        parsed = urlsplit(raw)
-    except ValueError:
-        return raw
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        return raw
-    return urlunsplit(
-        (parsed.scheme.lower(), parsed.netloc, parsed.path or "/", parsed.query, "")
-    )
-
-
-def _domain(url: str) -> str:
-    try:
-        return (urlsplit(url).hostname or "").lower()
-    except ValueError:
-        return ""
-
-
-def _diverse_candidates(
-    candidates: Iterable[Dict[str, Any]], limit: int
-) -> List[Dict[str, Any]]:
-    unique: List[Dict[str, Any]] = []
-    seen_urls = set()
-    for candidate in candidates:
-        canonical = _canonical_url(candidate.get("url"))
-        if not canonical or canonical in seen_urls:
-            continue
-        seen_urls.add(canonical)
-        unique.append(candidate)
-
-    selected: List[Dict[str, Any]] = []
-    deferred: List[Dict[str, Any]] = []
-    seen_domains = set()
-    for candidate in unique:
-        domain = _domain(str(candidate.get("url") or ""))
-        if domain and domain not in seen_domains:
-            selected.append(candidate)
-            seen_domains.add(domain)
-        else:
-            deferred.append(candidate)
-        if len(selected) >= limit:
-            return selected
-    selected.extend(deferred[: max(0, limit - len(selected))])
-    return selected
-
-
-def _advanced_query(query: str) -> str:
-    clean = _clean_inline(query, 1000)
-    if not clean or _BANG_RE.search(clean):
-        return clean
-    return f"!goc {clean}"
 
 
 def _compact_sources(
@@ -432,161 +659,6 @@ def _register_web_open(ctx: Any, check_fn: Any) -> None:
     )
 
 
-def _register_web_research(ctx: Any, check_fn: Any) -> None:
-    def search_one(query: str) -> Dict[str, Any]:
-        return _parse_tool_result(
-            ctx.dispatch_tool("web_search", {"query": _advanced_query(query), "limit": 6})
-        )
-
-    def handle(args: Dict[str, Any], **_kwargs: Any) -> str:
-        primary_query = _clean_inline(args.get("query"), 1000)
-        if not primary_query:
-            return _error_result("web_research requires a query", "web_research")
-        additional = args.get("additional_queries")
-        if not isinstance(additional, list):
-            additional = []
-        queries: List[str] = []
-        seen_queries = set()
-        for value in [primary_query, *additional[:2]]:
-            query = _clean_inline(value, 1000)
-            key = query.casefold()
-            if query and key not in seen_queries:
-                queries.append(query)
-                seen_queries.add(key)
-        try:
-            source_limit = max(2, min(int(args.get("max_sources", 4)), 5))
-        except (TypeError, ValueError):
-            source_limit = 4
-
-        started = time.monotonic()
-        search_started = time.monotonic()
-        responses: List[Dict[str, Any] | None] = [None] * len(queries)
-        with ThreadPoolExecutor(max_workers=min(3, len(queries))) as executor:
-            futures = {
-                executor.submit(copy_context().run, search_one, query): index
-                for index, query in enumerate(queries)
-            }
-            for future in as_completed(futures):
-                index = futures[future]
-                try:
-                    responses[index] = future.result()
-                except Exception as exc:
-                    responses[index] = {"error": _clean_inline(exc, 500)}
-        search_ms = round((time.monotonic() - search_started) * 1000)
-
-        candidate_groups: List[List[Dict[str, Any]]] = []
-        search_errors: List[str] = []
-        for query, response in zip(queries, responses):
-            payload = response or {"error": "Search returned no response"}
-            if payload.get("error") or payload.get("success") is False:
-                search_errors.append(
-                    _clean_inline(payload.get("error") or "Search failed", 500)
-                )
-                candidate_groups.append([])
-                continue
-            web_results = payload.get("data", {}).get("web", [])
-            if not isinstance(web_results, list):
-                candidate_groups.append([])
-                continue
-            group: List[Dict[str, Any]] = []
-            for item in web_results:
-                if isinstance(item, dict) and item.get("url"):
-                    group.append({**item, "source_query": query})
-            candidate_groups.append(group)
-
-        # Round-robin query variants so the primary query cannot consume every
-        # source slot before alternate formulations contribute candidates.
-        candidates: List[Dict[str, Any]] = []
-        max_group = max((len(group) for group in candidate_groups), default=0)
-        for rank in range(max_group):
-            for group in candidate_groups:
-                if rank < len(group):
-                    candidates.append(group[rank])
-
-        selected = _diverse_candidates(candidates, source_limit)
-        if not selected:
-            return _error_result(
-                search_errors[0] if search_errors else "No search results found",
-                "web_research",
-            )
-
-        fetch_started = time.monotonic()
-        extract_payload = _parse_tool_result(
-            ctx.dispatch_tool(
-                "web_extract",
-                {
-                    "urls": [item["url"] for item in selected],
-                    "char_limit": _RESEARCH_INNER_CHARS,
-                },
-            )
-        )
-        fetch_ms = round((time.monotonic() - fetch_started) * 1000)
-        extracted = extract_payload.get("results", [])
-        if not isinstance(extracted, list):
-            extracted = []
-
-        sources: List[Dict[str, Any]] = []
-        remaining = _RESEARCH_TOTAL_CHARS
-        for index, candidate in enumerate(selected):
-            item = extracted[index] if index < len(extracted) and isinstance(extracted[index], dict) else {}
-            sources_left = len(selected) - index
-            content_limit = min(
-                _RESEARCH_PER_SOURCE_CHARS,
-                remaining // max(1, sources_left),
-            )
-            content = _select_passages(
-                item.get("content"),
-                str(candidate.get("source_query") or primary_query),
-                max(0, content_limit),
-            )
-            remaining = max(0, remaining - len(content))
-            source: Dict[str, Any] = {
-                "title": _clean_inline(
-                    candidate.get("title") or item.get("title"), 240
-                ),
-                "url": _clean_inline(item.get("url") or candidate.get("url"), 4096),
-                "snippet": _clean_inline(candidate.get("description"), 360),
-                "content": content,
-            }
-            if item.get("error"):
-                source["error"] = _clean_inline(item.get("error"), 500)
-            sources.append(source)
-
-        returned_chars = sum(len(item.get("content", "")) for item in sources)
-        logger.info(
-            "web_research: queries=%d candidates=%d sources=%d search_ms=%d "
-            "fetch_ms=%d total_ms=%d returned_chars=%d",
-            len(queries),
-            len(candidates),
-            len(sources),
-            search_ms,
-            fetch_ms,
-            round((time.monotonic() - started) * 1000),
-            returned_chars,
-        )
-        result: Dict[str, Any] = {
-            "success": any(item.get("content") or item.get("snippet") for item in sources),
-            "queries": queries,
-            "sources": sources,
-        }
-        if search_errors:
-            result["search_errors"] = search_errors
-        if extract_payload.get("error"):
-            result["extract_error"] = _clean_inline(extract_payload["error"], 500)
-        return _untrusted_result(result, "web_research", max_chars=18000)
-
-    ctx.register_tool(
-        name="web_research",
-        toolset="web",
-        schema=WEB_RESEARCH_SCHEMA,
-        handler=handle,
-        check_fn=check_fn,
-        description=WEB_RESEARCH_SCHEMA["description"],
-        emoji="🔬",
-    )
-
-
-def register_tools(ctx: Any, *, open_available: Any, research_available: Any) -> None:
+def register_tools(ctx: Any, *, open_available: Any) -> None:
     """Register staged tools without overriding Hermes' core web tools."""
     _register_web_open(ctx, open_available)
-    _register_web_research(ctx, research_available)

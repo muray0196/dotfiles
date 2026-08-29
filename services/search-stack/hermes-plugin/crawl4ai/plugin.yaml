@@ -1,11 +1,12 @@
 name: web-crawl4ai
-version: 1.1.0
-description: "Fast local SearXNG search and bounded Crawl4AI retrieval for Hermes."
+version: 1.4.0
+description: "Fast local SearXNG discovery with bounded Crawl4AI context for Hermes."
 author: muray
 kind: backend
 provides_tools:
   - web_open
-  - web_research
+provides_hooks:
+  - transform_tool_result
 provides_web_providers:
   - searxng-fast
   - crawl4ai-compact
