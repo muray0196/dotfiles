@@ -886,7 +886,6 @@ Scope {
                     || typeof observation.humidity !== "number")
                 return;
 
-            const radarWasActive = radarRainDetected();
             weatherObservedAt = observation.observed_at;
             weatherState = typeof observation.state === "string"
                 ? observation.state
@@ -911,24 +910,13 @@ Scope {
             weatherFresh = true;
             weatherLastUpdateMs = Date.now();
             weatherFetchFailed = false;
-            syncRadarAnimation(true);
-            if (radarWasActive !== radarRainDetected())
-                requestRadarRefreshNow();
         } catch (error) {
             console.warn("Invalid Weathernews observation:", error);
         }
     }
 
-    function observedWeatherIsRain() {
-        return weatherAvailable
-            && (weatherState === "light_rain"
-                || weatherState === "rain"
-                || weatherState === "storm"
-                || weatherCondition.indexOf("雨") !== -1);
-    }
-
     function radarRainDetected() {
-        return observedWeatherIsRain() || radarNearbyPrecipitation;
+        return radarNearbyPrecipitation;
     }
 
     function applyRadarNearbyPrecipitation(value, referenceEpoch) {
