@@ -106,6 +106,8 @@ for path in root.rglob("*"):
 print("ok  profile, manifest, package, module, and action consistency")
 PY
 
+python3 "$ROOT/tests/test_search_stack_plugin.py"
+
 printf '\n== Profile resolution ==\n'
 DOTFILES_ROOT="$ROOT" bash <<'BASH'
 set -euo pipefail

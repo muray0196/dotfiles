@@ -9,6 +9,18 @@ search:
     - html
     - json
 
+engines:
+  # Override the built-in entry instead of creating an alias: SearXNG keys
+  # persisted locale/domain traits by engine name.
+  - name: google cse
+    engine: google_cse
+    shortcut: goc
+    categories:
+      - general
+      - web
+    page_size: 3
+    disabled: true
+
 server:
   bind_address: "0.0.0.0"
   port: 8080
