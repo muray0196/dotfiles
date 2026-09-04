@@ -516,7 +516,7 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(downstream_calls[0]["limit"], 3)
         self.assertEqual(len(extract_calls), 1)
         self.assertEqual(extract_calls[0][0], "web_extract")
-        self.assertEqual(extract_calls[0][1]["char_limit"], 12000)
+        self.assertEqual(extract_calls[0][1]["char_limit"], 500000)
         self.assertEqual(len(extract_calls[0][1]["urls"]), 3)
         self.assertEqual(payload["data"]["context_optimized_by"], "crawl4ai")
         self.assertEqual(len(payload["data"]["web"]), 3)
@@ -526,10 +526,125 @@ class ToolTests(unittest.TestCase):
                 for item in payload["data"]["web"]
             )
         )
-        self.assertLessEqual(
-            sum(len(item["description"]) for item in payload["data"]["web"]),
-            3600,
+        self.assertTrue(
+            all(
+                len(item["description"]) > 1200
+                for item in payload["data"]["web"]
+            )
         )
+
+    def test_weather_relevance_requires_weather_intent(self) -> None:
+        city_homepage = {
+            "title": "板橋区公式ホームページ",
+            "url": "https://www.city.itabashi.tokyo.jp/",
+            "description": "東京都板橋区の暮らしと行政情報",
+        }
+        weather_page = {
+            "title": "板橋区の今日の天気",
+            "url": "https://weather.example/itabashi",
+            "description": "東京都板橋区の気温と降水予報",
+        }
+
+        self.assertEqual(
+            plugin_tools._candidate_relevance_score(
+                city_homepage,
+                "Itabashi Tokyo weather today",
+            ),
+            0,
+        )
+        self.assertGreater(
+            plugin_tools._candidate_relevance_score(
+                weather_page,
+                "板橋区 天気 今日",
+            ),
+            0,
+        )
+
+    def test_direct_search_retries_fallback_before_crawling(self) -> None:
+        search_calls: list[dict[str, Any]] = []
+        extract_calls: list[dict[str, Any]] = []
+
+        def next_call(args: dict[str, Any]) -> str:
+            search_calls.append(dict(args))
+            fallback = args["query"].startswith("!ddgw ")
+            result = {
+                "title": (
+                    "板橋区の今日の天気"
+                    if fallback
+                    else "板橋区公式ホームページ"
+                ),
+                "url": (
+                    "https://weather.example/itabashi"
+                    if fallback
+                    else "https://www.city.itabashi.tokyo.jp/"
+                ),
+                "description": (
+                    "板橋区の気温と降水予報"
+                    if fallback
+                    else "東京都板橋区の暮らしと行政情報"
+                ),
+                "position": 1,
+            }
+            return json.dumps(
+                {"success": True, "data": {"web": [result]}},
+                ensure_ascii=False,
+            )
+
+        def dispatch(name: str, args: dict[str, Any]) -> str:
+            self.assertEqual(name, "web_extract")
+            extract_calls.append(dict(args))
+            return json.dumps(
+                {
+                    "results": [
+                        {
+                            "url": args["urls"][0],
+                            "title": "板橋区の今日の天気",
+                            "content": "板橋区は晴れ、気温24度、降水確率20%。",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+        middleware = plugin_tools.build_search_context_middleware(dispatch)
+        raw = middleware(
+            tool_name="web_search",
+            args={"query": "板橋区 天気 今日", "limit": 3},
+            next_call=next_call,
+        )
+        payload = json.loads(raw)
+
+        self.assertEqual(len(search_calls), 2)
+        self.assertEqual(search_calls[0]["query"], "板橋区 天気 今日")
+        self.assertEqual(search_calls[1]["query"], "!ddgw 板橋区 天気 今日")
+        self.assertEqual(len(extract_calls), 1)
+        self.assertEqual(
+            extract_calls[0]["urls"],
+            ["https://weather.example/itabashi"],
+        )
+        self.assertEqual(payload["data"]["context_optimized_by"], "crawl4ai")
+        self.assertEqual(payload["data"]["search_fallback_used"], "!ddgw")
+        self.assertNotIn("暮らしと行政情報", raw)
+
+    def test_explicit_search_bang_does_not_trigger_fallback(self) -> None:
+        search_calls: list[dict[str, Any]] = []
+
+        def next_call(args: dict[str, Any]) -> str:
+            search_calls.append(dict(args))
+            return json.dumps({"success": False, "error": "selected engine failed"})
+
+        middleware = plugin_tools.build_search_context_middleware(
+            lambda _name, _args: "unused"
+        )
+        raw = middleware(
+            tool_name="web_search",
+            args={"query": "!wp Python", "limit": 3},
+            next_call=next_call,
+        )
+        payload = json.loads(raw)
+
+        self.assertEqual(len(search_calls), 1)
+        self.assertFalse(payload["success"])
 
     def test_direct_search_fails_closed_when_crawl_context_is_unavailable(self) -> None:
         def dispatch(_name: str, args: dict[str, Any]) -> str:

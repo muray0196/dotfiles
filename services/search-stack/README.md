@@ -34,19 +34,21 @@ after a local backend failure.
 Hermes receives two staged retrieval paths:
 
 - `web_search`: normal mode. Discovers up to three URLs through the
-  `bing` SearXNG profile, moves an adjacent capitalized product name to the
-  front for ranking, opens results concurrently through Crawl4AI, and
-  replaces every returned snippet with a query-relevant page passage.
-  Candidates that do not match enough meaningful query terms are rejected
-  before crawling. Raw snippets fail closed if Crawl4AI cannot optimize any
-  page. Returned passage content is capped at 1,200 characters per result and
-  3,600 in total.
+  `google` SearXNG profile, opens results concurrently through Crawl4AI, and
+  replaces every returned snippet with a query-relevant page passage. If the
+  primary search fails, has no relevant candidates, or produces no crawlable
+  context, one DuckDuckGo Web retry runs through SearXNG before failing
+  closed. Weather and news candidates must preserve the matching query intent,
+  rather than passing on location words alone. Raw snippets never reach the
+  model. Each accepted result is replaced with Crawl4AI's page Markdown
+  directly, without query-passage selection or a plugin-level search-context
+  cap.
 - `web_open`: targeted mode. Opens one URL by default (at most two), selects
   relevant passages, returns at most 4,000 content characters per source, and
   caps the serialized JSON payload at 12,000 characters.
 
 For deep or multi-source requests, the agent runs up to three focused
-`web_search` calls. Every result still follows the same bounded Crawl4AI path;
+`web_search` calls. Every result still follows the same required Crawl4AI path;
 there is no separate research mode.
 
 Normal extraction uses Crawl4AI's compact `/md` response with cache reads

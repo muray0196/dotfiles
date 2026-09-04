@@ -17,9 +17,26 @@ _CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]+")
 
 _OPEN_INNER_CHARS = 20000
 _OPEN_OUTPUT_CHARS = 4000
-_SEARCH_INNER_CHARS = 12000
-_SEARCH_RESULT_CHARS = 1200
-_SEARCH_TOTAL_CHARS = 3600
+_SEARCH_INNER_CHARS = 500000
+
+_QUERY_INTENT_GROUPS = (
+    frozenset(
+        {
+            "weather",
+            "forecast",
+            "temperature",
+            "rain",
+            "snow",
+            "天気",
+            "予報",
+            "気温",
+            "降水",
+            "雨",
+            "雪",
+        }
+    ),
+    frozenset({"news", "headline", "headlines", "ニュース", "速報"}),
+)
 
 _QUERY_STOP_WORDS = frozenset(
     {
@@ -160,7 +177,7 @@ def build_search_context_middleware(
     dispatch_tool: Any,
     *,
     max_results: int = 3,
-    total_chars: int = _SEARCH_TOTAL_CHARS,
+    fallback_query_prefix: str = "!ddgw",
 ):
     """Replace model-facing SearXNG snippets with Crawl4AI page passages.
 
@@ -170,7 +187,9 @@ def build_search_context_middleware(
     direct model-issued ``web_extract`` calls fail closed.
     """
     result_limit = max(1, min(int(max_results), 5))
-    context_limit = max(1200, min(int(total_chars), 8000))
+    fallback_prefix = str(fallback_query_prefix or "").strip()
+    if not re.fullmatch(r"!\S+", fallback_prefix):
+        fallback_prefix = ""
 
     def optimize_result(**kwargs: Any) -> Any:
         args = kwargs.get("args")
@@ -191,144 +210,160 @@ def build_search_context_middleware(
                 ensure_ascii=False,
                 indent=2,
             )
-        is_search = tool_name == "web_search"
-        downstream_args = args
-        if is_search and isinstance(args, dict):
-            downstream_args = {**args, "limit": result_limit}
-        raw = next_call(downstream_args)
-        if not is_search:
-            return raw
+        if tool_name != "web_search":
+            return next_call(args)
 
         started = time.monotonic()
         query = _clean_inline(args.get("query"), 1000) if isinstance(args, dict) else ""
+        downstream_args = (
+            {**args, "limit": result_limit} if isinstance(args, dict) else args
+        )
+        attempts = [(downstream_args, "primary")]
+        if query and fallback_prefix and not _BANG_RE.search(query):
+            attempts.append(
+                (
+                    {
+                        **downstream_args,
+                        "query": f"{fallback_prefix} {query}",
+                    },
+                    "fallback",
+                )
+            )
+
         try:
-            payload = _parse_tool_result(raw)
-            if payload.get("error") or payload.get("success") is False:
-                return raw
-            data = payload.get("data")
-            web_results = data.get("web") if isinstance(data, dict) else None
-            if not isinstance(web_results, list) or not web_results:
-                return raw
-
-            candidates = []
-            for item in web_results:
-                if not isinstance(item, dict) or not item.get("url"):
+            failures: List[str] = []
+            for attempt_args, attempt_name in attempts:
+                if attempt_name == "fallback":
+                    logger.info(
+                        "web_search retrying through SearXNG fallback: %s",
+                        fallback_prefix,
+                    )
+                raw = next_call(attempt_args)
+                payload = _parse_tool_result(raw)
+                if payload.get("error") or payload.get("success") is False:
+                    failures.append(
+                        _clean_inline(
+                            payload.get("error") or "SearXNG search failed",
+                            300,
+                        )
+                    )
                     continue
-                if not _candidate_relevance_score(item, query):
+                data = payload.get("data")
+                web_results = data.get("web") if isinstance(data, dict) else None
+                if not isinstance(web_results, list) or not web_results:
+                    failures.append("SearXNG returned no URLs")
                     continue
-                candidates.append(item)
-                if len(candidates) >= result_limit:
-                    break
-            if not candidates:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": (
-                            "SearXNG returned no sufficiently relevant URLs for "
-                            "Crawl4AI optimization"
-                        ),
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
 
-            extract_payload = _parse_tool_result(
-                dispatch_tool(
-                    "web_extract",
-                    {
-                        "urls": [item["url"] for item in candidates],
-                        "char_limit": _SEARCH_INNER_CHARS,
-                    },
+                candidates = []
+                for item in web_results:
+                    if not isinstance(item, dict) or not item.get("url"):
+                        continue
+                    if not _candidate_relevance_score(item, query):
+                        continue
+                    candidates.append(item)
+                    if len(candidates) >= result_limit:
+                        break
+                if not candidates:
+                    failures.append("SearXNG returned no sufficiently relevant URLs")
+                    continue
+
+                extract_payload = _parse_tool_result(
+                    dispatch_tool(
+                        "web_extract",
+                        {
+                            "urls": [item["url"] for item in candidates],
+                            "char_limit": _SEARCH_INNER_CHARS,
+                        },
+                    )
                 )
+                extracted = extract_payload.get("results")
+                if not isinstance(extracted, list):
+                    extracted = []
+
+                usable: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+                crawl_errors: List[str] = []
+                for index, candidate in enumerate(candidates):
+                    item = (
+                        extracted[index]
+                        if index < len(extracted)
+                        and isinstance(extracted[index], dict)
+                        else {}
+                    )
+                    if item.get("content"):
+                        usable.append((candidate, item))
+                    elif item.get("error"):
+                        crawl_errors.append(_clean_inline(item["error"], 240))
+
+                if not usable:
+                    reason = extract_payload.get("error")
+                    if not reason and crawl_errors:
+                        reason = crawl_errors[0]
+                    detail = f": {_clean_inline(reason, 300)}" if reason else ""
+                    failures.append(f"Crawl4AI produced no optimized context{detail}")
+                    logger.warning(
+                        "web_search Crawl4AI context optimization failed: "
+                        "results=%d attempt=%s%s",
+                        len(candidates),
+                        attempt_name,
+                        detail,
+                    )
+                    continue
+
+                optimized: List[Dict[str, Any]] = []
+                for candidate, item in usable:
+                    content = str(item.get("content") or "").strip()
+                    if not content:
+                        continue
+                    optimized.append(
+                        {
+                            "title": _clean_inline(
+                                candidate.get("title") or item.get("title"), 240
+                            ),
+                            "url": _clean_inline(
+                                item.get("url") or candidate.get("url"), 2048
+                            ),
+                            "description": content,
+                            "position": len(optimized) + 1,
+                        }
+                    )
+
+                if not optimized:
+                    failures.append(
+                        "Crawl4AI returned pages but no usable optimized context"
+                    )
+                    continue
+
+                optimized_payload = copy.deepcopy(payload)
+                optimized_data = optimized_payload.setdefault("data", {})
+                optimized_data["web"] = optimized
+                optimized_data["context_optimized_by"] = "crawl4ai"
+                if attempt_name == "fallback":
+                    optimized_data["search_fallback_used"] = fallback_prefix
+                returned_chars = sum(
+                    len(item["description"]) for item in optimized
+                )
+                logger.info(
+                    "web_search Crawl4AI context: results=%d attempt=%s "
+                    "elapsed_ms=%d chars=%d",
+                    len(optimized),
+                    attempt_name,
+                    round((time.monotonic() - started) * 1000),
+                    returned_chars,
+                )
+                return json.dumps(optimized_payload, ensure_ascii=False, indent=2)
+
+            detail = _clean_inline(failures[-1], 300) if failures else "search failed"
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": (
+                        "SearXNG discovery and required Crawl4AI context "
+                        f"optimization failed: {detail}"
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
             )
-            extracted = extract_payload.get("results")
-            if not isinstance(extracted, list):
-                extracted = []
-
-            usable: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
-            crawl_errors: List[str] = []
-            for index, candidate in enumerate(candidates):
-                item = (
-                    extracted[index]
-                    if index < len(extracted) and isinstance(extracted[index], dict)
-                    else {}
-                )
-                if item.get("content"):
-                    usable.append((candidate, item))
-                elif item.get("error"):
-                    crawl_errors.append(_clean_inline(item["error"], 240))
-
-            if not usable:
-                reason = extract_payload.get("error")
-                if not reason and crawl_errors:
-                    reason = crawl_errors[0]
-                detail = f": {_clean_inline(reason, 300)}" if reason else ""
-                logger.warning(
-                    "web_search Crawl4AI context optimization failed: results=%d%s",
-                    len(candidates),
-                    detail,
-                )
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": (
-                            "SearXNG found results, but Crawl4AI could not produce "
-                            f"optimized context{detail}"
-                        ),
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-
-            optimized: List[Dict[str, Any]] = []
-            remaining = context_limit
-            for index, (candidate, item) in enumerate(usable):
-                sources_left = len(usable) - index
-                passage_limit = min(
-                    _SEARCH_RESULT_CHARS,
-                    remaining // max(1, sources_left),
-                )
-                passage = _select_passages(
-                    item.get("content"), query, max(0, passage_limit)
-                )
-                if not passage:
-                    continue
-                remaining = max(0, remaining - len(passage))
-                optimized.append(
-                    {
-                        "title": _clean_inline(
-                            candidate.get("title") or item.get("title"), 240
-                        ),
-                        "url": _clean_inline(
-                            item.get("url") or candidate.get("url"), 2048
-                        ),
-                        "description": passage,
-                        "position": len(optimized) + 1,
-                    }
-                )
-
-            if not optimized:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": "Crawl4AI returned pages but no usable optimized context",
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-
-            optimized_payload = copy.deepcopy(payload)
-            optimized_data = optimized_payload.setdefault("data", {})
-            optimized_data["web"] = optimized
-            optimized_data["context_optimized_by"] = "crawl4ai"
-            returned_chars = sum(len(item["description"]) for item in optimized)
-            logger.info(
-                "web_search Crawl4AI context: results=%d elapsed_ms=%d chars=%d",
-                len(optimized),
-                round((time.monotonic() - started) * 1000),
-                returned_chars,
-            )
-            return json.dumps(optimized_payload, ensure_ascii=False, indent=2)
         except Exception as exc:
             # Once SearXNG has succeeded, never fail open to its raw snippets:
             # the model-facing contract requires Crawl4AI-optimized context.
@@ -423,6 +458,12 @@ def _candidate_relevance_score(candidate: Dict[str, Any], query: str) -> int:
     description = str(candidate.get("description") or "").casefold()
     url = str(candidate.get("url") or "").casefold()
     combined = f"{title}\n{description}\n{url}"
+    folded_query = _BANG_RE.sub(" ", query).casefold()
+    for intent_terms in _QUERY_INTENT_GROUPS:
+        if any(term in folded_query for term in intent_terms) and not any(
+            term in combined for term in intent_terms
+        ):
+            return 0
     matched = {term for term in terms if term in combined}
     required = 1 if len(terms) == 1 else 2
     if len(matched) < required:

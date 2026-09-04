@@ -43,15 +43,17 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 
 base_url = sys.argv[1].rstrip("/")
-fast_engine = "bing"
+fast_engine = "google"
+fallback_engine = "duckduckgo web"
+fallback_shortcut = "ddgw"
 with urlopen(f"{base_url}/config", timeout=5) as response:
     config = json.load(response)
 loaded_engines = {
-    engine.get("name")
+    engine.get("name"): engine.get("shortcut")
     for engine in config.get("engines", [])
     if isinstance(engine, dict)
 }
-missing = {fast_engine} - loaded_engines
+missing = {fast_engine, fallback_engine} - loaded_engines.keys()
 if missing:
     raise SystemExit(
         f"SearXNG required engines are not loaded: {', '.join(sorted(missing))}"
@@ -73,7 +75,7 @@ def search_engine(engine_name):
 
 fast_results = search_engine(fast_engine)
 if not fast_results:
-    raise SystemExit("SearXNG Bing fast engine returned no preflight results")
+    raise SystemExit("SearXNG Google fast engine returned no preflight results")
 for engine_name, results in ((fast_engine, fast_results),):
     for result in results:
         engines = result.get("engines", []) if isinstance(result, dict) else []
@@ -82,6 +84,10 @@ for engine_name, results in ((fast_engine, fast_results),):
             raise SystemExit(
                 f"SearXNG {engine_name} preflight returned another engine"
             )
+if loaded_engines[fallback_engine] != fallback_shortcut:
+    raise SystemExit(
+        "SearXNG DuckDuckGo Web fallback shortcut is not !ddgw"
+    )
 PY
 
 plugin_parent="$(dirname -- "$plugin_target")"
@@ -220,11 +226,12 @@ hermes plugins doctor --ci "$plugin_target"
 hermes plugins enable web/crawl4ai --no-allow-tool-override
 hermes config set --force plugins.entries.web/crawl4ai.settings.base_url "http://127.0.0.1:11235"
 hermes config set --force plugins.entries.web/crawl4ai.settings.searxng_url "http://127.0.0.1:$searxng_host_port"
-hermes config set --force plugins.entries.web/crawl4ai.settings.fast_engines "bing"
+hermes config set --force plugins.entries.web/crawl4ai.settings.fast_engines "google"
+hermes config set --force plugins.entries.web/crawl4ai.settings.fallback_query_prefix "!ddgw"
 hermes config set --force plugins.entries.web/crawl4ai.settings.extract_char_limit 4000
 hermes config set --force plugins.entries.web/crawl4ai.settings.search_result_limit 3
-hermes config set --force plugins.entries.web/crawl4ai.settings.search_context_limit 3600
 hermes config set --force plugins.entries.web/crawl4ai.settings.env_file "$STACK_DIR/.env"
+hermes config unset plugins.entries.web/crawl4ai.settings.search_context_limit >/dev/null 2>&1 || true
 
 hermes plugins doctor --ci web/crawl4ai
 
@@ -248,4 +255,4 @@ fi
 # Remove config.yaml forms written by older versions of this setup script.
 hermes config unset SEARXNG_URL >/dev/null 2>&1 || true
 hermes config unset plugins.entries.web-crawl4ai >/dev/null 2>&1 || true
-info "Hermes uses fast SearXNG discovery with bounded Crawl4AI context"
+info "Hermes uses fast SearXNG discovery with Crawl4AI page retrieval"

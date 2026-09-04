@@ -19,7 +19,7 @@ from .tools import (
 
 
 _WEB_RETRIEVAL_POLICY = """Web retrieval:
-- Ordinary lookup: use web_search with limit 3. SearXNG discovers URLs; Crawl4AI concurrently returns bounded relevant page passages.
+- Ordinary lookup: use web_search with limit 3. SearXNG discovers URLs; Crawl4AI concurrently returns page Markdown.
 - For deep/thorough/exhaustive/しっかり/深く/multi-source requests, run up to three focused web_search queries. Each result is already Crawl4AI-optimized.
 - For exact verification after search, invoke deferred web_open through tool_call; use two URLs only to corroborate.
 - Never call direct web_extract; it is blocked for context safety.
@@ -51,7 +51,7 @@ def register(ctx) -> None:
 
     search_provider = FastSearXNGWebSearchProvider(
         base_url=str(searxng_url),
-        engines=str(ctx.get_config("fast_engines", default="bing")),
+        engines=str(ctx.get_config("fast_engines", default="google")),
         snippet_char_limit=int(
             _number_setting(ctx, "snippet_char_limit", 360, 120, 800)
         ),
@@ -90,8 +90,8 @@ def register(ctx) -> None:
             max_results=int(
                 _number_setting(ctx, "search_result_limit", 3, 1, 5)
             ),
-            total_chars=int(
-                _number_setting(ctx, "search_context_limit", 3600, 1200, 8000)
+            fallback_query_prefix=str(
+                ctx.get_config("fallback_query_prefix", default="!ddgw")
             ),
         ),
     )
