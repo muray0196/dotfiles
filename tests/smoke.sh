@@ -13,9 +13,12 @@ bash -n "$ROOT/modules/dotfiles-cli/.local/bin/dotfiles"
 printf 'ok  modules/dotfiles-cli/.local/bin/dotfiles\n'
 bash -n "$ROOT/modules/zsh-abbr/.local/bin/waywallen-update"
 printf 'ok  modules/zsh-abbr/.local/bin/waywallen-update\n'
+bash -n "$ROOT/modules/zsh-abbr/.local/bin/llama-router-update"
+printf 'ok  modules/zsh-abbr/.local/bin/llama-router-update\n'
 for entrypoint in \
   sync.sh \
   modules/dotfiles-cli/.local/bin/dotfiles \
+  modules/zsh-abbr/.local/bin/llama-router-update \
   modules/zsh-abbr/.local/bin/waywallen-update; do
   [[ -x "$ROOT/$entrypoint" ]] || {
     printf 'entry point is not executable: %s\n' "$entrypoint" >&2
@@ -445,6 +448,7 @@ if command -v stow >/dev/null 2>&1; then
     .config/zsh-abbr/user-abbreviations \
     .config/nvim/init.lua \
     .local/bin/dotfiles \
+    .local/bin/llama-router-update \
     .local/bin/waywallen-update \
     .gitconfig; do
     [[ -L "$test_home/$relative" ]] || {
@@ -456,6 +460,8 @@ if command -v stow >/dev/null 2>&1; then
 
   grep -Fqx 'profile:shell' "$test_home/.local/state/dotfiles-linux/selection"
   grep -Fqx '.local/bin/dotfiles' "$test_home/.local/state/dotfiles-linux/managed-paths"
+  grep -Fqx '.local/bin/llama-router-update' \
+    "$test_home/.local/state/dotfiles-linux/managed-paths"
   grep -Fqx '.local/bin/waywallen-update' \
     "$test_home/.local/state/dotfiles-linux/managed-paths"
   grep -Fqx '.config/starship.toml' "$test_home/.local/state/dotfiles-linux/managed-paths"
@@ -472,6 +478,8 @@ if command -v stow >/dev/null 2>&1; then
   [[ ! -e "$test_home/.config/starship/arch.toml" &&
     ! -L "$test_home/.config/starship/arch.toml" ]]
   [[ ! -e "$test_home/.config/nvim/init.lua" && ! -L "$test_home/.config/nvim/init.lua" ]]
+  [[ ! -e "$test_home/.local/bin/llama-router-update" &&
+    ! -L "$test_home/.local/bin/llama-router-update" ]]
   [[ ! -e "$test_home/.local/bin/waywallen-update" &&
     ! -L "$test_home/.local/bin/waywallen-update" ]]
   backup="$(find "$test_home/.local/state/dotfiles-linux/backups" -type f -name .zshrc -print -quit)"
@@ -552,6 +560,8 @@ if command -v zsh >/dev/null 2>&1; then
     "$ROOT/modules/zsh-abbr/.config/zsh-abbr/user-abbreviations"
   grep -Fqx 'abbr "wwup"="waywallen-update"' \
     "$ROOT/modules/zsh-abbr/.config/zsh-abbr/user-abbreviations"
+  grep -Fqx 'abbr "llup"="llama-router-update"' \
+    "$ROOT/modules/zsh-abbr/.config/zsh-abbr/user-abbreviations"
   grep -Fqx 'abbr "clean"="yay -Sc --noconfirm && brew cleanup"' \
     "$ROOT/modules/zsh-abbr/.config/zsh-abbr/user-abbreviations"
   printf 'ok  package maintenance abbreviations are non-interactive\n'
@@ -578,6 +588,7 @@ if command -v shellcheck >/dev/null 2>&1; then
     find "$ROOT" -type f -name '*.sh' ! -path "$ROOT/lib/*" -print0 | sort -z
   )
   scripts+=("$ROOT/modules/dotfiles-cli/.local/bin/dotfiles")
+  scripts+=("$ROOT/modules/zsh-abbr/.local/bin/llama-router-update")
   scripts+=("$ROOT/modules/zsh-abbr/.local/bin/waywallen-update")
   shellcheck -x "${scripts[@]}"
   printf 'ok  shellcheck\n'

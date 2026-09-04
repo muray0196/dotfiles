@@ -71,7 +71,7 @@ waywallen_version_for_directory() {
   [[ -d "$directory" && ! -L "$directory" ]] || return 1
   [[ -x "$directory/AppRun" && -x "$directory/usr/bin/waywallen" ]] || return 1
 
-  output="$($directory/AppRun --version 2>/dev/null)" || return 1
+  output="$("$directory"/AppRun --version 2>/dev/null)" || return 1
   [[ "$output" =~ waywallen[[:space:]]+([^[:space:]]+) ]] || return 1
   [[ "${BASH_REMATCH[1]}" == "${directory##*/}" ]] || return 1
 
@@ -265,7 +265,7 @@ source_tree="$extract_dir/squashfs-root"
 [[ -x "$source_tree/AppRun" && -x "$source_tree/usr/bin/waywallen" ]] ||
   die "downloaded AppImage did not extract a complete application"
 
-extracted_version="$($source_tree/AppRun --version 2>&1)"
+extracted_version="$("$source_tree"/AppRun --version 2>&1)"
 [[ "$extracted_version" =~ waywallen[[:space:]]+([^[:space:]]+) ]] ||
   die "could not determine the extracted Waywallen version"
 [[ "${BASH_REMATCH[1]}" == "$latest_version" ]] ||

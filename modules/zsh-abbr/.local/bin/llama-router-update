@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly DEFAULT_ROUTER_UNIT="local-llm-router.service"
+readonly DEFAULT_HEALTH_URL="http://127.0.0.1:8080/health"
+
+check_only=0
+temp_dir=""
+preflight_tree=""
+repo_root=""
+previous_binary=""
+restore_path=""
+health_response=""
+
+usage() {
+  cat <<'USAGE'
+Usage: llama-router-update [--check]
+
+Update the llama.cpp checkout used by the active local router while preserving
+its tracked patch set, then rebuild and restart the router.
+
+Options:
+  --check  Fetch and verify without updating the checkout, build, or service
+  -h       Show this help
+USAGE
+}
+
+die() {
+  printf 'llama-router-update: %s\n' "$*" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "required command is unavailable: $1"
+}
+
+cleanup() {
+  if [[ -n "$preflight_tree" && -d "$preflight_tree" && -n "$repo_root" ]]; then
+    git -C "$repo_root" worktree remove --force "$preflight_tree" \
+      >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then
+    rm -rf -- "$temp_dir"
+  fi
+  if [[ -n "$restore_path" && -e "$restore_path" ]]; then
+    rm -f -- "$restore_path"
+  fi
+}
+
+wait_for_health() {
+  health_response=""
+  for ((attempt = 1; attempt <= 120; attempt++)); do
+    if health_response="$(
+      curl --fail --silent --show-error --max-time 2 "$health_url" 2>/dev/null
+    )"; then
+      [[ -n "$health_response" ]] && return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+restore_previous_server() {
+  [[ -f "$previous_binary" ]] || return 1
+  restore_path="$working_dir/.llama-server.restore.$$"
+  cp --preserve=mode,timestamps -- "$previous_binary" "$restore_path"
+  mv -fT -- "$restore_path" "$server_binary"
+  restore_path=""
+}
+
+recover_router() {
+  local failure_message="$1"
+
+  printf 'Update failed; restoring the previous llama-server binary...\n' >&2
+  if restore_previous_server &&
+    systemctl --user restart "$router_unit" &&
+    wait_for_health &&
+    systemctl --user is-active --quiet "$router_unit"; then
+    die "$failure_message; the previous router binary was restored and is healthy"
+  fi
+  die "$failure_message; automatic router recovery also failed"
+}
+
+for argument in "$@"; do
+  case "$argument" in
+    --check)
+      check_only=1
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+require_command cmake
+require_command cp
+require_command curl
+require_command git
+require_command mktemp
+require_command mv
+require_command readlink
+require_command systemctl
+
+router_unit="${LLAMA_ROUTER_UNIT:-$DEFAULT_ROUTER_UNIT}"
+health_url="${LLAMA_ROUTER_HEALTH_URL:-$DEFAULT_HEALTH_URL}"
+build_jobs="${LLAMA_ROUTER_BUILD_JOBS:-16}"
+[[ "$build_jobs" =~ ^[1-9][0-9]*$ ]] ||
+  die "LLAMA_ROUTER_BUILD_JOBS must be a positive integer"
+
+working_dir="$(
+  systemctl --user show "$router_unit" --property=WorkingDirectory --value
+)" || die "could not inspect $router_unit"
+[[ -d "$working_dir" ]] ||
+  die "$router_unit has no usable working directory: $working_dir"
+[[ "${working_dir##*/}" == "bin" ]] ||
+  die "$router_unit working directory is not a build bin directory: $working_dir"
+
+repo_root="$(git -C "$working_dir" rev-parse --show-toplevel)" ||
+  die "the router working directory is not inside a Git checkout"
+[[ "$repo_root" != "/" ]] || die "refusing an unsafe repository root"
+build_dir="$(dirname -- "$working_dir")"
+server_binary="$working_dir/llama-server"
+[[ -f "$build_dir/CMakeCache.txt" && -x "$server_binary" ]] ||
+  die "the active llama-server build is incomplete: $build_dir"
+
+git -C "$repo_root" remote get-url origin >/dev/null ||
+  die "the active checkout has no origin remote"
+git -C "$repo_root" diff --check ||
+  die "the active checkout has whitespace errors"
+
+untracked_files="$(git -C "$repo_root" ls-files --others --exclude-standard)"
+[[ -z "$untracked_files" ]] ||
+  die "the active checkout has untracked files; preserve or remove them first"
+
+printf 'Router unit: %s\n' "$router_unit"
+printf 'Active checkout: %s\n' "$repo_root"
+printf 'Fetching origin/master...\n'
+git -C "$repo_root" fetch origin master
+git -C "$repo_root" show-ref --verify --quiet refs/remotes/origin/master ||
+  die "origin/master is unavailable after fetch"
+
+if ! git -C "$repo_root" merge-base --is-ancestor HEAD origin/master; then
+  die "the active checkout has local commits that require a manual rebase"
+fi
+
+old_head="$(git -C "$repo_root" rev-parse HEAD)"
+upstream_head="$(git -C "$repo_root" rev-parse origin/master)"
+read -r ahead_count behind_count < <(
+  git -C "$repo_root" rev-list --left-right --count HEAD...origin/master
+)
+
+temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/llama-router-update.XXXXXX")"
+trap cleanup EXIT
+patch_path="$temp_dir/tracked-changes.patch"
+preflight_tree="$temp_dir/upstream"
+git -C "$repo_root" diff --binary --full-index HEAD -- >"$patch_path"
+git -C "$repo_root" worktree add --detach --quiet "$preflight_tree" origin/master
+
+if [[ -s "$patch_path" ]]; then
+  git -C "$preflight_tree" apply --3way --check "$patch_path" ||
+    die "the current tracked patches do not apply cleanly to origin/master"
+fi
+
+git -C "$repo_root" worktree remove --force "$preflight_tree"
+preflight_tree=""
+printf 'Upstream preflight passed: ahead %s, behind %s.\n' \
+  "$ahead_count" "$behind_count"
+
+if [[ "$check_only" -eq 1 ]]; then
+  printf 'Check only; the checkout, build, and service were not changed.\n'
+  exit 0
+fi
+
+git -C "$repo_root" rebase --autostash origin/master
+[[ "$(git -C "$repo_root" rev-parse HEAD)" == "$upstream_head" ]] ||
+  die "the checkout did not reach the preflighted upstream commit"
+
+previous_binary="$temp_dir/llama-server.previous"
+cp --preserve=mode,timestamps -- "$server_binary" "$previous_binary"
+printf 'Building llama-server with %s parallel jobs...\n' "$build_jobs"
+if ! cmake --build "$build_dir" --target llama-server --parallel "$build_jobs"; then
+  restore_previous_server ||
+    die "the build failed and the previous server binary could not be restored"
+  die "the build failed; the previous server binary was restored"
+fi
+
+printf 'Restarting %s...\n' "$router_unit"
+systemctl --user restart "$router_unit" ||
+  recover_router "$router_unit could not restart with the updated binary"
+wait_for_health ||
+  recover_router "$router_unit did not become healthy within 120 seconds"
+systemctl --user is-active --quiet "$router_unit" ||
+  recover_router "$router_unit returned health but is not active"
+
+main_pid="$(systemctl --user show "$router_unit" --property=MainPID --value)"
+[[ "$main_pid" =~ ^[1-9][0-9]*$ ]] ||
+  recover_router "$router_unit has no valid main process"
+running_binary="$(readlink -f -- "/proc/$main_pid/exe")"
+expected_binary="$(readlink -f -- "$server_binary")"
+[[ "$running_binary" == "$expected_binary" ]] ||
+  recover_router "$router_unit restarted with an unexpected binary: $running_binary"
+
+printf 'Updated llama.cpp base: %.12s -> %.12s\n' "$old_head" "$upstream_head"
+printf 'Router health: %s\n' "$health_response"

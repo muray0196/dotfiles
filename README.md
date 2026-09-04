@@ -77,7 +77,11 @@ The `up` abbreviation upgrades pacman/AUR and Homebrew packages, then runs
 `wwup` checks the official AppImage release, verifies its published SHA-256,
 installs it beside the current version, and retains only the immediately
 previous version for rollback. Locally patched llama.cpp builds are not updated
-by either command.
+by either command. `llup` discovers the llama.cpp checkout used by the local
+router, verifies its tracked patch set against upstream `master` in a temporary
+worktree, rebases with those patches preserved, rebuilds `llama-server`, restarts
+the router, and waits for its health endpoint. Use `llup --check` for a
+non-updating preflight.
 
 ## Other commands
 
