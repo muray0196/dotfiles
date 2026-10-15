@@ -17,7 +17,7 @@ services:
       - search
 
   crawl4ai:
-    image: ${CRAWL4AI_IMAGE:-docker.io/unclecode/crawl4ai:0.9.2}
+    image: ${CRAWL4AI_IMAGE:-docker.io/unclecode/crawl4ai:0.9.4}
     container_name: crawl4ai
     restart: unless-stopped
     shm_size: 1gb

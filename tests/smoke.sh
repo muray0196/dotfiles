@@ -13,19 +13,22 @@ bash -n "$ROOT/modules/dotfiles-cli/.local/bin/dotfiles"
 printf 'ok  modules/dotfiles-cli/.local/bin/dotfiles\n'
 bash -n "$ROOT/modules/zsh-abbr/.local/bin/waywallen-update"
 printf 'ok  modules/zsh-abbr/.local/bin/waywallen-update\n'
-bash -n "$ROOT/modules/zsh-abbr/.local/bin/llama-router-update"
-printf 'ok  modules/zsh-abbr/.local/bin/llama-router-update\n'
+sh -n "$ROOT/modules/quickshell/.local/bin/widgets-toggle"
+printf 'ok  modules/quickshell/.local/bin/widgets-toggle\n'
 for entrypoint in \
   sync.sh \
   modules/dotfiles-cli/.local/bin/dotfiles \
-  modules/zsh-abbr/.local/bin/llama-router-update \
-  modules/zsh-abbr/.local/bin/waywallen-update; do
+  modules/zsh-abbr/.local/bin/waywallen-update \
+  modules/quickshell/.local/bin/widgets-toggle; do
   [[ -x "$ROOT/$entrypoint" ]] || {
     printf 'entry point is not executable: %s\n' "$entrypoint" >&2
     exit 1
   }
 done
 printf 'ok  new command entry points are executable\n'
+
+printf '\n== Waywallen updater ==\n'
+python3 "$ROOT/tests/test_waywallen_update.py"
 
 printf '\n== Structured configuration ==\n'
 python3 - "$ROOT" <<'PY'
@@ -110,6 +113,7 @@ print("ok  profile, manifest, package, module, and action consistency")
 PY
 
 python3 "$ROOT/tests/test_search_stack_plugin.py"
+python3 -B "$ROOT/tests/test_freeze_recorder.py"
 
 printf '\n== Profile resolution ==\n'
 DOTFILES_ROOT="$ROOT" bash <<'BASH'
@@ -155,6 +159,7 @@ for profile_file in "$DOTFILES_ROOT"/profiles/*; do
   for module in "${baseline_modules[@]}"; do
     assert_contains "$module" "${SELECTED_MODULES[@]}"
   done
+  assert_not_contains hermes "${SELECTED_MODULES[@]}"
   ((${#BREW_GROUPS[@]} > 0)) || {
     printf 'profile must resolve Homebrew packages: %s\n' "$profile" >&2
     exit 1
@@ -448,7 +453,6 @@ if command -v stow >/dev/null 2>&1; then
     .config/zsh-abbr/user-abbreviations \
     .config/nvim/init.lua \
     .local/bin/dotfiles \
-    .local/bin/llama-router-update \
     .local/bin/waywallen-update \
     .gitconfig; do
     [[ -L "$test_home/$relative" ]] || {
@@ -460,8 +464,6 @@ if command -v stow >/dev/null 2>&1; then
 
   grep -Fqx 'profile:shell' "$test_home/.local/state/dotfiles-linux/selection"
   grep -Fqx '.local/bin/dotfiles' "$test_home/.local/state/dotfiles-linux/managed-paths"
-  grep -Fqx '.local/bin/llama-router-update' \
-    "$test_home/.local/state/dotfiles-linux/managed-paths"
   grep -Fqx '.local/bin/waywallen-update' \
     "$test_home/.local/state/dotfiles-linux/managed-paths"
   grep -Fqx '.config/starship.toml' "$test_home/.local/state/dotfiles-linux/managed-paths"
@@ -478,8 +480,6 @@ if command -v stow >/dev/null 2>&1; then
   [[ ! -e "$test_home/.config/starship/arch.toml" &&
     ! -L "$test_home/.config/starship/arch.toml" ]]
   [[ ! -e "$test_home/.config/nvim/init.lua" && ! -L "$test_home/.config/nvim/init.lua" ]]
-  [[ ! -e "$test_home/.local/bin/llama-router-update" &&
-    ! -L "$test_home/.local/bin/llama-router-update" ]]
   [[ ! -e "$test_home/.local/bin/waywallen-update" &&
     ! -L "$test_home/.local/bin/waywallen-update" ]]
   backup="$(find "$test_home/.local/state/dotfiles-linux/backups" -type f -name .zshrc -print -quit)"
@@ -560,9 +560,7 @@ if command -v zsh >/dev/null 2>&1; then
     "$ROOT/modules/zsh-abbr/.config/zsh-abbr/user-abbreviations"
   grep -Fqx 'abbr "wwup"="waywallen-update"' \
     "$ROOT/modules/zsh-abbr/.config/zsh-abbr/user-abbreviations"
-  grep -Fqx 'abbr "llup"="llama-router-update"' \
-    "$ROOT/modules/zsh-abbr/.config/zsh-abbr/user-abbreviations"
-  grep -Fqx 'abbr "clean"="yay -Sc --noconfirm && brew cleanup"' \
+  grep -Fqx "abbr \"clean\"=\"yay -Scc --noconfirm && sudo find /var/cache/pacman/pkg -maxdepth 1 -type f -name '*.pkg.tar.*' ! -name '*.part' -delete && sudo find /var/lib/systemd/coredump -mindepth 1 -maxdepth 1 -type f -delete && brew cleanup\"" \
     "$ROOT/modules/zsh-abbr/.config/zsh-abbr/user-abbreviations"
   printf 'ok  package maintenance abbreviations are non-interactive\n'
 fi
@@ -588,8 +586,8 @@ if command -v shellcheck >/dev/null 2>&1; then
     find "$ROOT" -type f -name '*.sh' ! -path "$ROOT/lib/*" -print0 | sort -z
   )
   scripts+=("$ROOT/modules/dotfiles-cli/.local/bin/dotfiles")
-  scripts+=("$ROOT/modules/zsh-abbr/.local/bin/llama-router-update")
   scripts+=("$ROOT/modules/zsh-abbr/.local/bin/waywallen-update")
+  scripts+=("$ROOT/modules/quickshell/.local/bin/widgets-toggle")
   shellcheck -x "${scripts[@]}"
   printf 'ok  shellcheck\n'
 fi

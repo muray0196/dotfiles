@@ -42,7 +42,8 @@ Hermes receives two staged retrieval paths:
   rather than passing on location words alone. Raw snippets never reach the
   model. Each accepted result is replaced with Crawl4AI's page Markdown
   directly, without query-passage selection or a plugin-level search-context
-  cap.
+  cap. The fallback uses a nested core-tool dispatch because Hermes execution
+  middleware permits its continuation to run only once.
 - `web_open`: targeted mode. Opens one URL by default (at most two), selects
   relevant passages, returns at most 4,000 content characters per source, and
   caps the serialized JSON payload at 12,000 characters.

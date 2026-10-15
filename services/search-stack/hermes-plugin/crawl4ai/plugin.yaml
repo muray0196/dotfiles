@@ -1,5 +1,5 @@
 name: web-crawl4ai
-version: 1.6.0
+version: 1.6.1
 description: "Fast local SearXNG discovery with Crawl4AI page retrieval for Hermes."
 author: muray
 kind: backend

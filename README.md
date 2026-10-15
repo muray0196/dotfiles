@@ -75,13 +75,20 @@ dotfiles doctor
 The `up` abbreviation upgrades pacman/AUR and Homebrew packages, then runs
 `hermes update` when Hermes is installed. Waywallen is intentionally separate:
 `wwup` checks the official AppImage release, verifies its published SHA-256,
-installs it beside the current version, and retains only the immediately
-previous version for rollback. Locally patched llama.cpp builds are not updated
-by either command. `llup` discovers the llama.cpp checkout used by the local
-router, verifies its tracked patch set against upstream `master` in a temporary
-worktree, rebases with those patches preserved, rebuilds `llama-server`, restarts
-the router, and waits for its health endpoint. Use `llup --check` for a
-non-updating preflight.
+installs it beside the current version, and retains the immediately previous
+version for rollback, plus versions still running or referenced by another
+Waywallen launcher on `PATH`. Custom launchers can delegate to a sibling
+`waywallen-appimage` symlink pointing to the versioned `AppRun`; `wwup` updates
+that link and preserves the launcher. It makes the extracted application
+accessible to regular users and verifies the installed version before switching
+the launcher.
+
+The `clean` abbreviation non-interactively clears the complete pacman/AUR
+package cache, removes stored systemd crash dumps, and runs Homebrew cleanup.
+Pacman package archives are removed explicitly because `-Scc --noconfirm`
+defaults to declining full cache removal; partial downloads are retained.
+It requires administrator authentication for the system-owned cache and crash
+dump files.
 
 ## Other commands
 
@@ -108,6 +115,22 @@ Conflicting files are preserved under `~/.local/state/dotfiles-linux/backups/`.
 
 Place machine-specific settings in `~/.zshrc.local` and `~/.gitconfig.local`.
 
+## Hermes persona and skills (opt-in)
+
+The `hermes` module preserves the conversational persona in `~/.hermes/SOUL.md`
+and the local `productivity/conversation-history-recovery` skill. It targets the
+default `~/.hermes` home and is kept out of the shared profiles:
+
+```bash
+./install.sh --module hermes --dry-run --plan
+./install.sh --module hermes
+```
+
+The module manages these files only; install Hermes separately. Credentials,
+`config.yaml`, memories, sessions, and downloaded skills remain local. No
+services are installed or started. Edits through the deployed symlinks update
+the repository files.
+
 ## Quickshell desktop widgets (opt-in)
 
 The `quickshell` module contains the Arch/Hyprland desktop widgets and is kept
@@ -117,6 +140,10 @@ out of the shared profiles. Preview and install it explicitly:
 ./install.sh --module quickshell --dry-run --plan
 ./install.sh --module quickshell
 ```
+
+The module also provides `widgets-toggle`, which shows or hides the running
+`clock` and `performance` widgets together using Quickshell IPC. It uses the
+clock widget's visibility to choose the new state and requires `/usr/bin/qs`.
 
 Real credentials, location data, BLE identifiers, display hardware settings,
 and mutable automation state are local files and are never tracked. Create only
@@ -137,6 +164,10 @@ boundaries are recorded in
 [`docs/quickshell-ui-plan.md`](docs/quickshell-ui-plan.md).
 
 Additional setup for GitHub authentication, Docker, SearXNG, and similar tools must be run explicitly from `scripts/`.
+
+For recurring desktop stalls, the optional [freeze recorder](services/freeze-recorder/README.md)
+preserves Quickshell/Hyprland logs and bounded process/pressure samples across
+reboots. Install it explicitly with `python3 scripts/setup-freeze-recorder.py`.
 
 ## Package ownership
 

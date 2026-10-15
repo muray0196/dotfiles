@@ -238,7 +238,11 @@ def build_search_context_middleware(
                         "web_search retrying through SearXNG fallback: %s",
                         fallback_prefix,
                     )
-                raw = next_call(attempt_args)
+                    # Hermes execution continuations are single-use. Dispatch
+                    # the retry as a nested core search, like extraction below.
+                    raw = dispatch_tool("web_search", attempt_args)
+                else:
+                    raw = next_call(attempt_args)
                 payload = _parse_tool_result(raw)
                 if payload.get("error") or payload.get("success") is False:
                     failures.append(

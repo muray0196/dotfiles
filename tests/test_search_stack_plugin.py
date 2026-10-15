@@ -563,8 +563,9 @@ class ToolTests(unittest.TestCase):
     def test_direct_search_retries_fallback_before_crawling(self) -> None:
         search_calls: list[dict[str, Any]] = []
         extract_calls: list[dict[str, Any]] = []
+        downstream_calls: list[dict[str, Any]] = []
 
-        def next_call(args: dict[str, Any]) -> str:
+        def search(args: dict[str, Any]) -> str:
             search_calls.append(dict(args))
             fallback = args["query"].startswith("!ddgw ")
             result = {
@@ -590,7 +591,15 @@ class ToolTests(unittest.TestCase):
                 ensure_ascii=False,
             )
 
+        def next_call(args: dict[str, Any]) -> str:
+            if downstream_calls:
+                raise RuntimeError("downstream execution is single-use")
+            downstream_calls.append(dict(args))
+            return search(args)
+
         def dispatch(name: str, args: dict[str, Any]) -> str:
+            if name == "web_search":
+                return search(args)
             self.assertEqual(name, "web_extract")
             extract_calls.append(dict(args))
             return json.dumps(
@@ -614,6 +623,7 @@ class ToolTests(unittest.TestCase):
         )
         payload = json.loads(raw)
 
+        self.assertEqual(len(downstream_calls), 1)
         self.assertEqual(len(search_calls), 2)
         self.assertEqual(search_calls[0]["query"], "板橋区 天気 今日")
         self.assertEqual(search_calls[1]["query"], "!ddgw 板橋区 天気 今日")
@@ -625,6 +635,59 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(payload["data"]["context_optimized_by"], "crawl4ai")
         self.assertEqual(payload["data"]["search_fallback_used"], "!ddgw")
         self.assertNotIn("暮らしと行政情報", raw)
+
+    def test_search_fallback_recovers_primary_search_and_crawl_failures(self) -> None:
+        for failure in ("search_error", "no_urls", "crawl_error"):
+            with self.subTest(failure=failure):
+                downstream_calls = []
+                nested_calls = []
+                candidate = {
+                    "title": "Python documentation",
+                    "url": "https://docs.example/python",
+                    "description": "Python raw snippet",
+                }
+                search_result = {"success": True, "data": {"web": [candidate]}}
+
+                def next_call(args: dict[str, Any]) -> str:
+                    if downstream_calls:
+                        raise RuntimeError("downstream execution is single-use")
+                    downstream_calls.append(dict(args))
+                    if failure == "search_error":
+                        return json.dumps({"success": False, "error": "CAPTCHA"})
+                    if failure == "no_urls":
+                        return json.dumps({"success": True, "data": {"web": []}})
+                    return json.dumps(search_result)
+
+                def dispatch(name: str, args: dict[str, Any]) -> str:
+                    nested_calls.append((name, dict(args)))
+                    if name == "web_search":
+                        return json.dumps(search_result)
+                    self.assertEqual(name, "web_extract")
+                    if failure == "crawl_error" and len(nested_calls) == 1:
+                        return json.dumps({"results": [{"error": "crawl failed"}]})
+                    return json.dumps({"results": [{
+                        "url": candidate["url"], "content": "Python crawled evidence",
+                    }]})
+
+                raw = plugin_tools.build_search_context_middleware(dispatch)(
+                    tool_name="web_search",
+                    args={"query": "Python documentation", "limit": 3},
+                    next_call=next_call,
+                )
+                payload = json.loads(raw)
+                self.assertTrue(payload["success"], raw)
+                self.assertEqual(len(downstream_calls), 1)
+                self.assertEqual(
+                    [args for name, args in nested_calls if name == "web_search"],
+                    [{"query": "!ddgw Python documentation", "limit": 3}],
+                )
+                self.assertEqual(payload["data"]["search_fallback_used"], "!ddgw")
+                self.assertEqual(payload["data"]["context_optimized_by"], "crawl4ai")
+                self.assertEqual(
+                    payload["data"]["web"][0]["description"],
+                    "Python crawled evidence",
+                )
+                self.assertNotIn("raw snippet", raw)
 
     def test_explicit_search_bang_does_not_trigger_fallback(self) -> None:
         search_calls: list[dict[str, Any]] = []
@@ -647,7 +710,9 @@ class ToolTests(unittest.TestCase):
         self.assertFalse(payload["success"])
 
     def test_direct_search_fails_closed_when_crawl_context_is_unavailable(self) -> None:
-        def dispatch(_name: str, args: dict[str, Any]) -> str:
+        def dispatch(name: str, args: dict[str, Any]) -> str:
+            if name == "web_search":
+                return json.dumps({"success": False, "error": "fallback failed"})
             return json.dumps(
                 {
                     "results": [

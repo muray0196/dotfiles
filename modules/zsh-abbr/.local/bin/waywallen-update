@@ -14,6 +14,8 @@ usage() {
 Usage: waywallen-update [--check]
 
 Update an existing versioned Waywallen AppImage installation.
+Custom launchers can delegate to a sibling waywallen-appimage symlink.
+Extracted files are made readable and executable as needed before installation.
 
 Options:
   --check  Report whether a newer release is available without installing it
@@ -93,6 +95,19 @@ directory_is_in_use() {
   return 1
 }
 
+directory_has_launcher() {
+  local directory="$1"
+  local launcher
+  local executable_path
+
+  while IFS= read -r launcher; do
+    executable_path="$(readlink -f -- "$launcher" 2>/dev/null || true)"
+    [[ "$executable_path" != "$directory/"* ]] || return 0
+  done < <(type -a -p waywallen waywallen-appimage || true)
+
+  return 1
+}
+
 prune_old_versions() {
   local install_directory="$1"
   local active_directory="$2"
@@ -110,6 +125,11 @@ prune_old_versions() {
       printf '%s\n%s\n' "$candidate_version" "$active_version" | sort -V | tail -n 1
     )"
     [[ "$newest_version" == "$active_version" ]] || continue
+
+    if directory_has_launcher "$candidate"; then
+      printf 'Keeping version referenced by another launcher: %s\n' "$candidate"
+      continue
+    fi
 
     if directory_is_in_use "$candidate"; then
       printf 'Keeping in-use older version: %s\n' "$candidate"
@@ -146,7 +166,14 @@ require_command sort
 command_path="$(command -v waywallen 2>/dev/null || true)"
 [[ -n "$command_path" ]] || die "Waywallen is not installed"
 
+launcher_path="$command_path"
 resolved_path="$(readlink -f -- "$command_path")"
+if [[ "${resolved_path##*/}" != "AppRun" ]]; then
+  command_path="$(dirname -- "$command_path")/waywallen-appimage"
+  [[ -L "$command_path" ]] ||
+    die "a custom Waywallen launcher must delegate to a sibling waywallen-appimage symlink"
+  resolved_path="$(readlink -f -- "$command_path")"
+fi
 [[ "${resolved_path##*/}" == "AppRun" ]] ||
   die "expected the Waywallen command to resolve to a versioned AppRun"
 
@@ -162,11 +189,19 @@ update_link="$(find_update_link "$command_path")" ||
 [[ "$(readlink -f -- "$update_link")" == "$resolved_path" ]] ||
   die "the Waywallen symlink chain changed during inspection"
 
-version_output="$($resolved_path --version 2>&1)"
+version_output="$("$resolved_path" --version 2>&1)"
 if [[ "$version_output" =~ waywallen[[:space:]]+([^[:space:]]+) ]]; then
   current_version="${BASH_REMATCH[1]}"
 else
   die "could not determine the installed Waywallen version"
+fi
+
+if [[ "$launcher_path" != "$command_path" ]]; then
+  launcher_version="$("$launcher_path" --version 2>&1)" ||
+    die "could not determine the custom launcher's Waywallen version"
+  [[ "$launcher_version" =~ waywallen[[:space:]]+([^[:space:]]+) &&
+    "${BASH_REMATCH[1]}" == "$current_version" ]] ||
+    die "the custom launcher and waywallen-appimage point to different versions"
 fi
 
 case "$(uname -m)" in
@@ -262,6 +297,8 @@ mkdir -p "$extract_dir"
 )
 
 source_tree="$extract_dir/squashfs-root"
+# Extraction can create private directories that become inaccessible after sudo cp.
+chmod -R a+rX -- "$source_tree"
 [[ -x "$source_tree/AppRun" && -x "$source_tree/usr/bin/waywallen" ]] ||
   die "downloaded AppImage did not extract a complete application"
 
@@ -283,6 +320,9 @@ staging_path="$install_root/.$latest_version.new.$$"
 sudo cp -a --no-preserve=ownership -- "$source_tree" "$staging_path"
 sudo mv -- "$staging_path" "$target_path"
 staging_path=""
+
+waywallen_version_for_directory "$target_path" >/dev/null ||
+  die "installed Waywallen cannot run as the current user; the launcher was left unchanged"
 
 replacement_link="$update_link.new.$$"
 sudo ln -s -- "$target_path/AppRun" "$replacement_link"

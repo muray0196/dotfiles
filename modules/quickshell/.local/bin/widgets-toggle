@@ -1,0 +1,21 @@
+#!/bin/sh
+
+set -eu
+
+state=$(/usr/bin/qs --no-color ipc -c clock --any-display prop get widgets visible)
+
+case "$state" in
+  true)
+    action=hideWidgets
+    ;;
+  false)
+    action=showWidgets
+    ;;
+  *)
+    printf 'unexpected widget visibility: %s\n' "$state" >&2
+    exit 1
+    ;;
+esac
+
+/usr/bin/qs --no-color ipc -c clock --any-display call widgets "$action"
+/usr/bin/qs --no-color ipc -c performance --any-display call widgets "$action"

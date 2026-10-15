@@ -55,6 +55,7 @@ Examples:
   ./install.sh --profile server --set-shell
   ./install.sh --profile wsl-development
   ./install.sh --module starship --module tmux
+  ./install.sh --module hermes --dry-run --plan
 USAGE
 }
 

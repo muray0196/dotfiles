@@ -1,0 +1,4 @@
+# Hermes persona and selected local skills; intentionally opt-in.
+# The Hermes client and services are managed separately.
+native:stow
+stow:hermes
