@@ -1,0 +1,58 @@
+diff --git a/src/GlassLayerSurface.cpp b/src/GlassLayerSurface.cpp
+index 51809f9..abc6e2a 100644
+--- a/src/GlassLayerSurface.cpp
++++ b/src/GlassLayerSurface.cpp
+@@ -447,12 +447,16 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha, bool
+     g_pHyprRenderer->m_renderData.currentFB = m_surfaceTempFramebuffer;
+     glBindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_surfaceTempFramebuffer.get())->getFBID());
+ 
+-    // Unpadded: the composite quad only ever reads transformBox (rawBox, never
+-    // padded), so the SAMPLE_PADDING_PX-expanded part of a padded clear is never
+-    // sampled — true regardless of mask mode, not the region-sized clear a
+-    // literal reading of "region-aware" would suggest (that would under-clear
+-    // real surface area outside the region that the composite quad does read).
+-    CBox clearBox = transformBox.intersection(CBox{0.0, 0.0, static_cast<double>(monitorWidth), static_cast<double>(monitorHeight)}).noNegativeSize().round();
++    // The direct composite reads only transformBox, but local foreground
++    // backing also copies SAMPLE_PADDING_PX around it before blurring alpha.
++    // Clear that footprint too: otherwise reused/uninitialized pixels outside
++    // the surface become a false dark frame, varying by widget and allocation.
++    const SResolveContext foregroundContext = {resolvePresetName(), resolveThemeIsDark(),
++        g_pGlobalState->config, g_pGlobalState->customPresets};
++    CBox clearBox = transformBox;
++    if (resolvePresetFloat(foregroundContext, &SPresetValues::localDimming, &SOverridableConfig::localDimming, 0.0f) > 0.0f)
++        clearBox.expand(GlassRenderer::SAMPLE_PADDING_PX);
++    clearBox = clearBox.intersection(CBox{0.0, 0.0, static_cast<double>(monitorWidth), static_cast<double>(monitorHeight)}).noNegativeSize().round();
+ 
+     if (std::isfinite(clearBox.x) && std::isfinite(clearBox.y) && std::isfinite(clearBox.w) && std::isfinite(clearBox.h) &&
+         clearBox.w > 0.0 && clearBox.h > 0.0) {
+diff --git a/src/Shaders.hpp b/src/Shaders.hpp
+index 201cadd..0fd1bd6 100644
+--- a/src/Shaders.hpp
++++ b/src/Shaders.hpp
+@@ -568,6 +568,14 @@ void main() {
+         float alignment = dot(capOutward, lightDir(bevelAngle));
+         reflectionLobe = pow(max(alignment, 0.0), 10.0)
+             + 0.28 * pow(max(-alignment, 0.0), 14.0);
++        if (integratedLens > 0.001) {
++            // A wider virtual light reaches the straight edges as well as the
++            // corners. Keep its footprint in the existing narrow contour core;
++            // this changes angular coverage, not the broad surface sheen.
++            float extendedLobe = pow(max(alignment, 0.0), 4.0)
++                + 0.20 * pow(max(-alignment, 0.0), 6.0);
++            reflectionLobe = mix(reflectionLobe, extendedLobe, integratedLens);
++        }
+     }
+ 
+     // BEVEL — thin lit line hugging the edge, brightest on the side facing the light
+@@ -655,7 +663,10 @@ void main() {
+         float shoulder = exp(-pow((depth - 1.5) / 2.1, 2.0));
+         float glint = (0.75 * core + 0.10 * shoulder) * reflectionLobe
+             * shapedReflection * materialProgress;
+-        color = mix(color, vec3(1.0), clamp(glint, 0.0, 1.0));
++        // A small environment contribution gives the light a local colour,
++        // while retaining a bright specular core on dark backgrounds.
++        vec3 glintLight = mix(vec3(1.0), reflectedEnvironment, 0.08 * integratedLens);
++        color = mix(color, glintLight, clamp(glint, 0.0, 1.0));
+     }
+ 
+     // SPECULAR — subtle top highlight (edge zone)

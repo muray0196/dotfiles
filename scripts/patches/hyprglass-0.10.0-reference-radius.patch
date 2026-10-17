@@ -1,0 +1,13 @@
+diff --git a/src/PluginConfig.cpp b/src/PluginConfig.cpp
+index 4bd1611..2d66176 100644
+--- a/src/PluginConfig.cpp
++++ b/src/PluginConfig.cpp
+@@ -395,7 +395,7 @@ static bool setPresetFloatField(SPresetValues& values, std::string_view key, std
+     if (key == "adaptive_boost")       { values.adaptiveBoost = parsed; return true; }
+     if (key == "refraction_flow")      { values.refractionFlow = parsed; return true; }
+     if (key == "edge_clarity")         { values.edgeClarity = std::clamp(parsed, 0.0f, 1.0f); return true; }
+-    if (key == "layer_radius") { values.layerRadius = std::clamp(parsed, 0.0f, 48.0f); return true; }
++    if (key == "layer_radius") { values.layerRadius = std::clamp(parsed, 0.0f, 1024.0f); return true; }
+     if (key == "rim_width") { values.rimWidth = std::clamp(parsed, 0.0f, 40.0f); return true; }
+     if (key == "surface_curve") { values.surfaceCurve = std::clamp(parsed, 0.0f, 3.0f); return true; }
+     if (key == "integrated_lens") { values.integratedLens = std::clamp(parsed, 0.0f, 1.0f); return true; }

@@ -2,9 +2,9 @@
 
 ## Goal
 
-Build a desktop UI that has the crisp, slightly old-fashioned edge of older
-software while remaining immediately understandable. The intended direction is
-**retro framing with modern information design**.
+Keep the accepted clear glass material and give its contents a compact,
+legible hierarchy through typography, alignment, and grouping. Retain every
+measurement, source detail, status, and calendar/weather field at a glance.
 
 The left and right widget groups serve different jobs and should not be forced
 into identical layouts:
@@ -13,12 +13,40 @@ into identical layouts:
 - The right side is an ambient information column for time, calendar, weather,
   sensors, and radar.
 
-The current discomfort comes from inconsistent visual grammar between those two
-groups, not from their different content.
+The two columns share type, spacing, status, and separator roles while keeping
+layouts suited to their different content.
 
-## Accepted baseline
+## Current glass content
+
+- The six information panels use Adwaita Sans with tabular figures, sentence-case
+  headings, smaller units, and a stronger heading/value/metadata hierarchy.
+- Text is flat. The existing optical renderer supplies local contrast; major
+  groups use quiet single-line separators and header rows use spacing.
+- Status markers and utilization tracks have rounded ends, with their existing
+  meanings and resource colours retained.
+- The clock keeps hours, minutes, seconds, full date, weekday, and timezone.
+  Its 312 × 162 px footprint is independent of the new type metrics.
+- The calendar retains its dates, ISO week, day-of-year, holiday information,
+  and weekend colours. Alignment replaces cell borders; today uses a circle.
+- Indoor/outdoor observations, deltas, sensor metadata, all five forecast hours,
+  precipitation, temperatures, and rain outlook remain visible.
+- Performance keeps device identity, live readings, capacities, mount state,
+  networking, and history. Average and maximum compute power share a row so
+  their value text does not overlap within the fixed summary panel.
+- Rain Radar is excluded from this redesign. A separate legacy palette instance
+  preserves its text, separator, colours, viewport, and position.
+- All seven live panel rectangles were unchanged at 1920 × 1080. Native text
+  bounds checks found no clipped or overlapping text among 251 visible fields.
+  The clock combines its former separate hour/minute text objects; information
+  is retained. Renderer binaries, glass parameters, and data collectors are unchanged.
+
+The sections below record the earlier design experiments.
+
+## Earlier square-panel baseline
 
 - Square panels with no corner radius.
+- Separate 312 px panels with 12 px screen margins, 10 px vertical gaps,
+  and borders retained around each panel.
 - A restrained neutral border rather than a colored outline.
 - Continuous square-ended utilization bars without percentage labels, plus
   square status indicators.
@@ -29,6 +57,70 @@ groups, not from their different content.
 - Compact, legible information hierarchy with accurate status semantics.
 
 This baseline is the rollback point before further design experiments.
+
+## Liquid Glass material trial
+
+The opt-in HyprGlass experiment preserves the 312 px panel widths and content
+order. The earlier screen-filling layout was reverted at the user's request:
+12 px screen margins and 10 px vertical gaps are restored. Each of the three
+left panels and four right panels has its own surface so the retained glass
+effect follows its bounds. Opaque radar content remains above the material.
+
+Four treatments are available through `scripts/quickshell-glass.py`: `smoky`,
+`clear`, `frosted`, and `liquid`. Clear is the user's fallback preference, but
+was rejected as satisfying the Liquid Glass request: it reads primarily as blur.
+The next `liquid` prototype uses a patched renderer with full-resolution sharp
+background sampling at the rim, a softened interior, and edge-following refraction.
+The rim shares the interior's tone response; restrained neutral highlights,
+80% sharp-sample blending, and no chromatic fringing keep it from appearing
+like a separate coloured border. See [build details](quickshell-glass.md).
+
+The next trial adds three opt-in curved treatments: `rounded` balances clarity
+and refraction, `soft` scatters more background detail, and `sculpted` increases
+the lens strength. Their 20–22 px client corners match the compositor's glass
+outline. One rounded cap normal drives refraction and light response, with a
+consistent logical rim width across panel heights and a faint exterior shadow.
+The existing square `liquid` treatment remains available. Panel dimensions,
+spacing, content positions, and internal dividers stay the same.
+
+The optics3 trial completes the remaining two improvements. Background contrast
+controls extra scattering and a small neutral dim in the panel interior, with
+the outer optical rim protected. Widget visibility uses a 220 ms entrance and
+180 ms exit: the composite and shadow fade together while refraction and
+highlights settle. Mid-transition toggles reverse from the current progress.
+The transition timer stops at rest; global desktop animations remain unchanged.
+
+Visual acceptance remains with the user; this does not reproduce Apple's
+interaction-driven shape changes. `off` restores the previous dark material.
+Successful choices are saved across reboots. An explicit `restore` command in
+desktop startup waits for both widgets and reapplies the saved material; it can
+also be run after widget process restarts. Standard profiles do not activate it.
+The Lua configuration limits glass to the two widget namespaces.
+
+Judge the result on the live display over bright, dark, detailed, and moving
+wallpaper. Shader readiness and screenshots establish rendering and layout;
+they do not establish smooth motion or a fixed power overhead. HyprGlass must
+match the running Hyprland build.
+
+The initial live trial used HyprGlass 0.10.0 built against Hyprland 0.56.2.
+Both columns retained their 312 x 1080 geometry. An eight-second moving
+backdrop check recorded 464 compositor frames and 629 layer background
+refreshes; the temporary backdrop was then removed. Reload retention, material
+rollback, and repository smoke checks passed. This is a bounded functional
+check, not a long-duration animation or power benchmark.
+
+The removal check exposed an upstream cache limitation: a disappearing bottom
+layer can remain in the sampled background until another background update.
+The helper requests a brief fresh sample whenever a style is applied. The optics
+patch additionally invalidates the remaining layers on layer closure. A moving
+striped bottom-layer test returned to the wallpaper on removal without invoking
+the helper. This was checked on the current unrotated display; it does not
+establish all monitor-transform or animation cases.
+
+The follow-up also found that evaluating preset definitions alone leaves them
+pending inside HyprGlass. The helper now reloads the sourced configuration,
+checks the selected preset and compositor errors, and checks shader readiness
+after the first draw before reporting success.
 
 ## Current performance hierarchy
 
@@ -59,8 +151,8 @@ Unify the chrome around the content while preserving the content itself:
    right-aligned status/update text. The large clock remains an intentional
    exception.
 3. Use one 1 px divider treatment throughout.
-4. Use shared spacing tokens as a starting point: 16 px outer padding, 10 px
-   panel gaps, 7 px section gaps, and 4 px tight internal gaps.
+4. Keep 16 px horizontal content padding, 12 px screen-edge margins, 10 px panel
+   gaps, 7 px section gaps, and 4 px tight internal gaps.
 5. Keep icons and semantic color because they improve recognition: green for
    good/live, red for faults, amber for schedule/caution, and stable colors for
    CPU/GPU/RAM/VRAM identity.

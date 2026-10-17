@@ -1,5 +1,7 @@
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
+import Quickshell.Hyprland
 import QtQuick
 import "common" as UI
 
@@ -8,10 +10,52 @@ Scope {
 
     UI.Theme {
         id: theme
+        glassStyle: materialState.style
+    }
+
+    UI.Theme {
+        id: radarTheme
+        glassStyle: materialState.style
+        legacyContent: true
+    }
+
+    PersistentProperties {
+        id: materialState
+        reloadableId: "widget-material"
+        property string style: "off"
+        property bool shown: true
+        property bool motionReady: false
     }
 
     readonly property int widgetWidth: 312
-    property bool widgetsVisible: true
+    property alias widgetsVisible: materialState.shown
+    property bool widgetsMapped: false
+
+    // Only the widget material animates; global desktop animations stay untouched.
+    function syncWidgetVisibility(snap: bool): void {
+        widgetHideTimer.stop();
+        const animate = theme.curvedGlass && materialState.motionReady;
+        if (animate) {
+            const action = snap ? (widgetsVisible ? "shown" : "hidden")
+                : (widgetsVisible ? "show" : "hide");
+            if (Hyprland.usingLua)
+                Hyprland.dispatch('function() hl.plugin.hyprglass.visibility("quickshell-clock", "' + action + '") end');
+            else
+                Hyprland.dispatch("hyprglass:visibility quickshell-clock " + action);
+        }
+        if (widgetsVisible || snap || !animate)
+            widgetsMapped = widgetsVisible;
+        else
+            widgetHideTimer.restart();
+    }
+
+    onWidgetsVisibleChanged: syncWidgetVisibility(false)
+
+    Timer {
+        id: widgetHideTimer
+        interval: 260 // Keep the surface alive through the renderer's 180 ms exit.
+        onTriggered: if (!shell.widgetsVisible) shell.widgetsMapped = false;
+    }
     readonly property string clockScriptsDir: Quickshell.shellDir + "/scripts"
     readonly property string clockConfigPath: Quickshell.shellDir + "/local.json"
     readonly property int panelContentWidth: 280
@@ -31,9 +75,6 @@ Scope {
     readonly property int currentWeekday: calendarDate.getDay()
     readonly property string currentDateKey:
         dateKey(currentYear, currentMonth, currentDay)
-    readonly property string currentDateLabel: currentYear + " / "
-        + padded(currentMonth) + " / " + padded(currentDay) + " · "
-        + calendarWeekdayLabels[currentWeekday]
     property string currentTimeZoneAbbreviation: ""
     readonly property string currentTimeZoneLabel:
         (currentTimeZoneAbbreviation !== ""
@@ -389,37 +430,40 @@ Scope {
 
         Item {
             width: parent.width
-            height: 11
+            height: 13
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 anchors.centerIn: parent
                 text: label
                 color: theme.textMuted
-                font.family: "Adwaita Mono"
-                font.pixelSize: 9
+                font.family: theme.labelFont
+                font.pixelSize: 11
                 font.weight: Font.Medium
             }
         }
 
         Item {
             width: parent.width
-            height: environmentValueRow.implicitHeight
+            height: 29
 
             Row {
                 id: environmentValueRow
                 anchors.centerIn: parent
                 spacing: 2
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     id: environmentValue
                     text: valueText
                     color: valueColor
                     font.family: "Adwaita Sans"
                     font.pixelSize: theme.metricValueSize
-                    font.weight: Font.Normal
+                    font.weight: Font.Medium
                 }
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     anchors.baseline: environmentValue.baseline
                     text: unitText
                     color: unitColor
@@ -435,11 +479,12 @@ Scope {
             height: 13
             visible: reserveComparisonSpace || comparison !== ""
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 anchors.centerIn: parent
                 text: comparison
                 color: theme.textMuted
-                font.family: "Adwaita Mono"
+                font.family: theme.labelFont
                 font.pixelSize: 10
                 font.weight: Font.Normal
             }
@@ -447,11 +492,16 @@ Scope {
     }
 
     component ModuleDivider: Item {
+        id: moduleDivider
+        property QtObject palette: theme
+        property bool lineVisible: true
         property real lineOffsetY: 0
 
         implicitHeight: shell.moduleDividerHeight
 
-        Rectangle {
+        UI.GlassSeparator {
+            palette: moduleDivider.palette
+            visible: moduleDivider.lineVisible
             anchors {
                 horizontalCenter: parent.horizontalCenter
                 verticalCenter: parent.verticalCenter
@@ -459,7 +509,7 @@ Scope {
             }
             width: parent.width
             height: 1
-            color: theme.divider
+            color: moduleDivider.palette.divider
         }
     }
 
@@ -471,20 +521,22 @@ Scope {
         implicitHeight: Math.max(19, footerValue.implicitHeight)
         height: implicitHeight
 
-        Text {
+        UI.GlassText {
+            palette: theme
             id: footerLabel
             anchors {
                 left: parent.left
                 verticalCenter: parent.verticalCenter
             }
-            text: fieldLabel
+            text: fieldLabel.toLowerCase().replace(/^./, c => c.toUpperCase())
             color: theme.textMuted
-            font.family: "Adwaita Mono"
+            font.family: theme.labelFont
             font.pixelSize: theme.moduleFooterLabelSize
             font.weight: Font.Medium
         }
 
-        Text {
+        UI.GlassText {
+            palette: theme
             id: footerValue
             anchors {
                 left: footerLabel.right
@@ -1187,6 +1239,8 @@ Scope {
         target: "widgets"
 
         property bool visible: shell.widgetsVisible
+        readonly property string glassStyle: materialState.style
+        readonly property bool glassMotion: materialState.motionReady
 
         function showWidgets(): void {
             shell.widgetsVisible = true;
@@ -1196,9 +1250,23 @@ Scope {
             shell.widgetsVisible = false;
         }
 
+        function setGlassStyle(style: string): void {
+            if (["off", "smoky", "legacy-clear", "frosted", "liquid", "clear", "blurred", "rounded", "soft", "sculpted"].indexOf(style) !== -1)
+                materialState.style = style;
+            shell.syncWidgetVisibility(true);
+        }
+
+        function setGlassMotion(enabled: bool): void {
+            materialState.motionReady = enabled;
+            shell.syncWidgetVisibility(true);
+        }
+
     }
 
     component PanelEdge: Item {
+        // The curved material supplies its own continuous optical highlight.
+        visible: !theme.curvedGlass
+
         Rectangle {
             anchors {
                 top: parent.top
@@ -1242,7 +1310,8 @@ Scope {
 
     PanelWindow {
         id: clockWindow
-        visible: shell.widgetsVisible
+        visible: shell.widgetsMapped
+        WlrLayershell.namespace: "quickshell-clock"
 
         anchors {
             top: true
@@ -1255,7 +1324,8 @@ Scope {
         }
 
         implicitWidth: shell.widgetWidth
-        implicitHeight: clockContent.implicitHeight + 28
+        // Keep the accepted clock footprint independent of the font metrics.
+        implicitHeight: 162
         color: "transparent"
         exclusiveZone: 0
         focusable: false
@@ -1263,7 +1333,7 @@ Scope {
 
         Rectangle {
             anchors.fill: parent
-            radius: 0
+            radius: theme.panelRadius
             color: theme.panelBackground
             border.width: 0
 
@@ -1281,6 +1351,7 @@ Scope {
                 height: 24
 
                 UI.ModuleHeaderRail {
+                    compact: true
                     anchors {
                         left: parent.left
                         verticalCenter: parent.verticalCenter
@@ -1288,33 +1359,36 @@ Scope {
                     tone: shell.localTimeSourceTone
                 }
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     anchors {
                         left: parent.left
                         leftMargin: 10
                         verticalCenter: parent.verticalCenter
                     }
-                    text: "LOCAL TIME"
+                    text: "Local time"
                     color: theme.textPrimary
-                    font.family: "Adwaita Mono"
-                    font.pixelSize: 17
-                    font.weight: Font.Medium
+                    font.family: theme.labelFont
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
                 }
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     anchors {
                         right: parent.right
                         verticalCenter: parent.verticalCenter
                     }
                     text: shell.currentTimeZoneLabel
                     color: theme.textMuted
-                    font.family: "Adwaita Mono"
-                    font.pixelSize: 9
+                    font.family: theme.labelFont
+                    font.pixelSize: 10
                     font.weight: Font.Medium
                 }
             }
 
             ModuleDivider {
+                lineVisible: false
                 anchors {
                     top: parent.top
                     topMargin: 34
@@ -1324,104 +1398,62 @@ Scope {
                 height: implicitHeight
             }
 
-            Column {
-                id: clockContent
+            Item {
                 anchors {
-                    bottom: parent.bottom
-                    bottomMargin: shell.panelBottomInset
+                    top: parent.top
+                    topMargin: 39
                     horizontalCenter: parent.horizontalCenter
                 }
-                spacing: -2
+                width: shell.panelContentWidth
+                height: 83
 
                 Row {
-                    id: timeRow
+                    anchors.centerIn: parent
                     spacing: 8
-                    transform: Translate { y: 8 }
 
-                    Text {
-                        id: hourText
-                        text: Qt.formatDateTime(clock.date, "HH")
+                    UI.GlassText {
+                        id: timeText
+                        palette: theme
+                        text: Qt.formatDateTime(clock.date, "HH:mm")
                         color: theme.textPrimary
-                        font.family: "Adwaita Mono"
-                        font.pixelSize: 90
+                        font.family: theme.labelFont
+                        font.pixelSize: 78
                         font.weight: Font.Normal
                     }
 
-                    Item {
-                        width: 16
-                        height: hourText.implicitHeight
-
-                        Rectangle {
-                            width: 8
-                            height: 8
-                            radius: 0
-                            color: theme.textPrimary
-                            anchors {
-                                horizontalCenter: parent.horizontalCenter
-                                verticalCenter: parent.verticalCenter
-                                verticalCenterOffset: -18
-                            }
-                        }
-
-                        Rectangle {
-                            width: 8
-                            height: 8
-                            radius: 0
-                            color: theme.textPrimary
-                            anchors {
-                                horizontalCenter: parent.horizontalCenter
-                                verticalCenter: parent.verticalCenter
-                                verticalCenterOffset: 11
-                            }
-                        }
+                    UI.GlassText {
+                        palette: theme
+                        anchors.baseline: timeText.baseline
+                        text: Qt.formatDateTime(clock.date, "ss")
+                        color: theme.textSecondary
+                        font.family: theme.labelFont
+                        font.pixelSize: 25
+                        font.weight: Font.Medium
                     }
-
-                    Item {
-                        implicitWidth: minuteText.implicitWidth + 2 + secondText.implicitWidth
-                        implicitHeight: minuteText.implicitHeight
-
-                        Text {
-                            id: minuteText
-                            anchors.left: parent.left
-                            text: Qt.formatDateTime(clock.date, "mm")
-                            color: theme.textPrimary
-                            font.family: "Adwaita Mono"
-                            font.pixelSize: 90
-                            font.weight: Font.Normal
-                        }
-
-                        Text {
-                            id: secondText
-                            anchors {
-                                left: minuteText.right
-                                leftMargin: 2
-                                baseline: minuteText.baseline
-                            }
-                            text: Qt.formatDateTime(clock.date, "ss")
-                            color: theme.textPrimary
-                            font.family: "Adwaita Mono"
-                            font.pixelSize: 32
-                            font.weight: Font.Normal
-                        }
-                    }
-                }
-
-                Text {
-                    width: timeRow.width
-                    horizontalAlignment: Text.AlignHCenter
-                    text: shell.currentDateLabel
-                    color: theme.textPrimary
-                    font.family: "Adwaita Mono"
-                    font.pixelSize: 18
-                    font.weight: Font.Normal
                 }
             }
+
+            UI.GlassText {
+                palette: theme
+                anchors {
+                    bottom: parent.bottom
+                    bottomMargin: 12
+                    horizontalCenter: parent.horizontalCenter
+                }
+                text: Qt.formatDateTime(clock.date, "ddd, d MMM yyyy")
+                color: theme.textSecondary
+                font.family: theme.labelFont
+                font.pixelSize: 16
+                font.weight: Font.Medium
+            }
+
         }
     }
 
     PanelWindow {
         id: calendarWindow
-        visible: shell.widgetsVisible
+        visible: shell.widgetsMapped
+        WlrLayershell.namespace: "quickshell-clock"
 
         anchors {
             top: true
@@ -1443,7 +1475,7 @@ Scope {
 
         Rectangle {
             anchors.fill: parent
-            radius: 0
+            radius: theme.panelRadius
             color: theme.panelBackground
             border.width: 0
 
@@ -1466,6 +1498,7 @@ Scope {
                     height: 31
 
                     UI.ModuleHeaderRail {
+                        compact: true
                         anchors {
                             left: parent.left
                             verticalCenter: parent.verticalCenter
@@ -1474,18 +1507,19 @@ Scope {
                         tone: shell.calendarSourceTone
                     }
 
-                    Text {
+                    UI.GlassText {
+                        palette: theme
                         anchors {
                             left: parent.left
                             leftMargin: 10
                             verticalCenter: parent.verticalCenter
                             verticalCenterOffset: -6
                         }
-                        text: "CALENDAR"
+                        text: "Calendar"
                         color: theme.textPrimary
-                        font.family: "Adwaita Mono"
-                        font.pixelSize: 17
-                        font.weight: Font.Medium
+                        font.family: theme.labelFont
+                        font.pixelSize: 16
+                        font.weight: Font.DemiBold
                     }
 
                     Column {
@@ -1497,32 +1531,35 @@ Scope {
                         width: 150
                         spacing: -1
 
-                        Text {
+                        UI.GlassText {
+                            palette: theme
                             width: parent.width
                             horizontalAlignment: Text.AlignRight
                             text: shell.currentYear + " / "
                                 + shell.padded(shell.currentMonth)
                             color: theme.textSecondary
-                            font.family: "Adwaita Mono"
+                            font.family: theme.labelFont
                             font.pixelSize: 11
                             font.weight: Font.Medium
                         }
 
-                        Text {
+                        UI.GlassText {
+                            palette: theme
                             width: parent.width
                             horizontalAlignment: Text.AlignRight
-                            text: "ISO W" + shell.currentIsoWeek + " · DAY "
+                            text: "ISO W" + shell.currentIsoWeek + " · Day "
                                 + shell.currentDayOfYear + "/"
                                 + shell.currentYearLength
                             color: theme.textMuted
-                            font.family: "Adwaita Mono"
-                            font.pixelSize: 9
+                            font.family: theme.labelFont
+                            font.pixelSize: 10
                             font.weight: Font.Normal
                         }
                     }
                 }
 
                 ModuleDivider {
+                    lineVisible: false
                     width: parent.width
                     lineOffsetY: -8
                 }
@@ -1538,43 +1575,26 @@ Scope {
                         Repeater {
                             model: shell.calendarWeekdayLabels
 
-                            delegate: Text {
+                            delegate: UI.GlassText {
+                                palette: theme
                                 required property int index
                                 required property string modelData
 
                                 width: calendarContent.width / 7
                                 horizontalAlignment: Text.AlignHCenter
-                                text: modelData
+                                text: modelData.charAt(0) + modelData.slice(1).toLowerCase()
                                 color: index === 0
                                     ? theme.calendarSundayHoliday
                                     : index === 6 ? theme.calendarSaturday
                                     : theme.textSecondary
-                                font.family: "Adwaita Mono"
+                                font.family: theme.labelFont
                                 font.pixelSize: 10
                                 font.weight: Font.Medium
                             }
                         }
                     }
 
-                    Item {
-                        anchors.fill: parent
-                        z: 1
 
-                        Repeater {
-                            model: 8
-
-                            delegate: Rectangle {
-                                required property int index
-
-                                x: index === 7
-                                    ? parent.width - 1
-                                    : Math.round(index * parent.width / 7)
-                                width: 1
-                                height: parent.height
-                                color: theme.calendarGridVertical
-                            }
-                        }
-                    }
                 }
 
                 ModuleDivider {
@@ -1608,59 +1628,30 @@ Scope {
                                 height: calendarGrid.cellHeight
 
                                 Rectangle {
-                                    anchors.fill: parent
+                                    anchors.centerIn: parent
+                                    width: 24
+                                    height: 24
                                     visible: modelData.isToday
-                                    radius: 0
+                                    radius: 12
                                     color: theme.calendarTodayFill
                                 }
 
-                                Text {
+                                UI.GlassText {
+                                    palette: theme
                                     anchors.centerIn: parent
                                     text: modelData.day
-                                    color: shell.calendarDayColor(modelData)
+                                    color: modelData.isToday ? "#182337"
+                                        : shell.calendarDayColor(modelData)
                                     font.family: "Adwaita Sans"
                                     font.pixelSize: 15
                                     font.weight: modelData.isToday
-                                        ? Font.Medium : Font.Normal
+                                        ? Font.DemiBold : Font.Medium
                                 }
                             }
                         }
                     }
 
-                    Item {
-                        anchors.fill: parent
-                        z: 1
 
-                        Repeater {
-                            model: 8
-
-                            delegate: Rectangle {
-                                required property int index
-
-                                x: index === 7
-                                    ? parent.width - 1
-                                    : Math.round(index * parent.width / 7)
-                                width: 1
-                                height: parent.height
-                                color: theme.calendarGridVertical
-                            }
-                        }
-
-                        Repeater {
-                            model: calendarGrid.weekCount
-
-                            delegate: Rectangle {
-                                required property int index
-
-                                y: index === 0 ? 0
-                                    : index * (calendarGrid.cellHeight
-                                        + calendarGrid.rowSpacing) - 1
-                                width: parent.width
-                                height: 1
-                                color: theme.calendarGridHorizontal
-                            }
-                        }
-                    }
                 }
 
                 ModuleDivider {
@@ -1683,7 +1674,8 @@ Scope {
 
     PanelWindow {
         id: weatherWindow
-        visible: shell.widgetsVisible
+        visible: shell.widgetsMapped
+        WlrLayershell.namespace: "quickshell-clock"
 
         anchors {
             top: true
@@ -1705,7 +1697,7 @@ Scope {
 
         Rectangle {
             anchors.fill: parent
-            radius: 0
+            radius: theme.panelRadius
             color: theme.panelBackground
             border.width: 0
 
@@ -1728,6 +1720,7 @@ Scope {
                     height: 24
 
                     UI.ModuleHeaderRail {
+                        compact: true
                         anchors {
                             left: parent.left
                             verticalCenter: parent.verticalCenter
@@ -1735,33 +1728,36 @@ Scope {
                         tone: shell.environmentSourceTone
                     }
 
-                    Text {
+                    UI.GlassText {
+                        palette: theme
                         anchors {
                             left: parent.left
                             leftMargin: 10
                             verticalCenter: parent.verticalCenter
                         }
-                        text: "ENVIRONMENT"
+                        text: "Environment"
                         color: theme.textPrimary
-                        font.family: "Adwaita Mono"
-                        font.pixelSize: 17
-                        font.weight: Font.Medium
+                        font.family: theme.labelFont
+                        font.pixelSize: 16
+                        font.weight: Font.DemiBold
                     }
 
-                    Text {
+                    UI.GlassText {
+                        palette: theme
                         anchors {
                             right: parent.right
                             verticalCenter: parent.verticalCenter
                         }
-                        text: "BLE · WEATHERNEWS"
+                        text: "BLE · Weathernews"
                         color: theme.textMuted
-                        font.family: "Adwaita Mono"
-                        font.pixelSize: 9
+                        font.family: theme.labelFont
+                        font.pixelSize: 10
                         font.weight: Font.Medium
                     }
                 }
 
                 ModuleDivider {
+                    lineVisible: false
                     width: parent.width
                 }
 
@@ -1772,7 +1768,7 @@ Scope {
                     UI.SectionHeader {
                         width: parent.width
                         palette: theme
-                        label: "INDOOR"
+                        label: "Indoor"
                         healthMarkerVisible: true
                         healthTone: shell.indoorSourceCurrent
                             ? theme.statusOk : shell.indoorSourceTone
@@ -1791,7 +1787,7 @@ Scope {
 
                         EnvironmentMetric {
                             width: parent.width / 2
-                            label: "TEMP"
+                            label: "Temp"
                             valueText: shell.indoorSourceCurrent
                                 ? shell.temperature.toFixed(1) : "--.-"
                             unitText: "°C"
@@ -1808,7 +1804,7 @@ Scope {
 
                         EnvironmentMetric {
                             width: parent.width / 2
-                            label: "HUMIDITY"
+                            label: "Humidity"
                             valueText: shell.indoorSourceCurrent
                                 ? shell.humidity.toString() : "--"
                             unitText: "%"
@@ -1836,7 +1832,7 @@ Scope {
                     UI.SectionHeader {
                         width: parent.width
                         palette: theme
-                        label: "OUTDOOR"
+                        label: "Outdoor"
                         healthMarkerVisible: true
                         healthTone: shell.outdoorSourceCurrent
                             ? theme.statusOk : shell.outdoorSourceTone
@@ -1859,23 +1855,25 @@ Scope {
 
                             Item {
                                 width: parent.width
-                                height: 11
+                                height: 13
 
-                                Text {
+                                UI.GlassText {
+                                    palette: theme
                                     anchors.centerIn: parent
-                                    text: "CONDITION"
+                                    text: "Condition"
                                     color: theme.textMuted
-                                    font.family: "Adwaita Mono"
-                                    font.pixelSize: 9
+                                    font.family: theme.labelFont
+                                    font.pixelSize: 10
                                     font.weight: Font.Medium
                                 }
                             }
 
                             Item {
                                 width: parent.width
-                                height: 31
+                                height: 29
 
-                                Text {
+                                UI.GlassText {
+                                    palette: theme
                                     anchors.centerIn: parent
                                     text: shell.weatherAvailable
                                         ? shell.weatherSymbol(shell.weatherState)
@@ -1893,7 +1891,7 @@ Scope {
 
                         EnvironmentMetric {
                             width: 100
-                            label: "TEMP"
+                            label: "Temp"
                             reserveComparisonSpace: false
                             valueText: shell.weatherAvailable
                                 ? shell.weatherTemperature.toFixed(1) : "--.-"
@@ -1906,7 +1904,7 @@ Scope {
 
                         EnvironmentMetric {
                             width: 100
-                            label: "HUMIDITY"
+                            label: "Humidity"
                             reserveComparisonSpace: false
                             valueText: shell.weatherAvailable
                                 ? shell.weatherHumidity.toString() : "--"
@@ -1928,33 +1926,35 @@ Scope {
                     id: forecastBlock
                     width: parent.width
                     visible: shell.hourlyForecast.length > 0
-                    spacing: 0
+                    spacing: 1
 
                     Item {
                         width: parent.width
                         height: 19
 
-                        Text {
+                        UI.GlassText {
+                            palette: theme
                             anchors {
                                 left: parent.left
                                 verticalCenter: parent.verticalCenter
                             }
-                            text: "NEXT 5 HOURS"
+                            text: "Next 5 hours"
                             color: theme.textMuted
-                            font.family: "Adwaita Mono"
+                            font.family: theme.labelFont
                             font.pixelSize: 11
                             font.weight: Font.Medium
                         }
 
-                        Text {
+                        UI.GlassText {
+                            palette: theme
                             anchors {
                                 right: parent.right
                                 verticalCenter: parent.verticalCenter
                             }
-                            text: "PRECIP / TEMP"
+                            text: "Precip / Temp"
                             color: theme.textTertiary
-                            font.family: "Adwaita Mono"
-                            font.pixelSize: 9
+                            font.family: theme.labelFont
+                            font.pixelSize: 10
                             font.weight: Font.Normal
                         }
                     }
@@ -1978,17 +1978,19 @@ Scope {
                                     width: parent.width
                                     spacing: 0
 
-                                    Text {
+                                    UI.GlassText {
+                                        palette: theme
                                         width: parent.width
                                         horizontalAlignment:
                                             Text.AlignHCenter
                                         text: modelData.hour
                                         color: theme.textPrimary
-                                        font.family: "Adwaita Mono"
+                                        font.family: theme.labelFont
                                         font.pixelSize: 13
                                     }
 
-                                    Text {
+                                    UI.GlassText {
+                                        palette: theme
                                         width: parent.width
                                         horizontalAlignment:
                                             Text.AlignHCenter
@@ -2000,13 +2002,10 @@ Scope {
                                         font.weight: Font.Normal
                                     }
 
-                                    Rectangle {
-                                        width: parent.width
-                                        height: 1
-                                        color: theme.divider
-                                    }
+                                    Item { width: parent.width; height: 1 }
 
-                                    Text {
+                                    UI.GlassText {
+                                        palette: theme
                                         width: parent.width
                                         horizontalAlignment:
                                             Text.AlignHCenter
@@ -2020,13 +2019,10 @@ Scope {
                                         font.pixelSize: 13
                                     }
 
-                                    Rectangle {
-                                        width: parent.width
-                                        height: 1
-                                        color: theme.divider
-                                    }
+                                    Item { width: parent.width; height: 1 }
 
-                                    Text {
+                                    UI.GlassText {
+                                        palette: theme
                                         width: parent.width
                                         horizontalAlignment:
                                             Text.AlignHCenter
@@ -2039,17 +2035,7 @@ Scope {
                                     }
                                 }
 
-                                Rectangle {
-                                    anchors {
-                                        top: parent.top
-                                        right: parent.right
-                                        bottom: parent.bottom
-                                    }
-                                    visible: index
-                                        < shell.hourlyForecast.length - 1
-                                    width: 1
-                                    color: theme.divider
-                                }
+
                             }
                         }
                     }
@@ -2064,7 +2050,7 @@ Scope {
                     id: rainOutlookRow
                     width: parent.width
                     visible: shell.rainOutlook !== ""
-                    fieldLabel: "RAIN OUTLOOK"
+                    fieldLabel: "Rain outlook"
                     fieldValue: shell.rainOutlook
                 }
             }
@@ -2073,7 +2059,8 @@ Scope {
 
     PanelWindow {
         id: radarWindow
-        visible: shell.widgetsVisible
+        visible: shell.widgetsMapped
+        WlrLayershell.namespace: "quickshell-clock"
 
         anchors {
             top: true
@@ -2093,13 +2080,13 @@ Scope {
         exclusiveZone: 0
         focusable: false
         mask: Region {
-            item: jmaNowcastLink
+            item: shell.widgetsVisible ? jmaNowcastLink : null
         }
 
         Rectangle {
             anchors.fill: parent
-            radius: 0
-            color: theme.panelBackground
+            radius: radarTheme.panelRadius
+            color: radarTheme.panelBackground
             border.width: 0
 
             PanelEdge {
@@ -2128,7 +2115,8 @@ Scope {
                         tone: shell.radarSourceTone
                     }
 
-                    Text {
+                    UI.GlassText {
+                        palette: radarTheme
                         anchors {
                             left: parent.left
                             leftMargin: 10
@@ -2136,13 +2124,14 @@ Scope {
                             verticalCenterOffset: -4
                         }
                         text: "RAIN RADAR"
-                        color: theme.textPrimary
+                        color: radarTheme.textPrimary
                         font.family: "Adwaita Mono"
                         font.pixelSize: 17
                         font.weight: Font.Medium
                     }
 
-                    Text {
+                    UI.GlassText {
+                        palette: radarTheme
                         width: 150
                         anchors {
                             right: parent.right
@@ -2151,14 +2140,15 @@ Scope {
                         }
                         horizontalAlignment: Text.AlignRight
                         text: shell.radarFrameStatusText
-                        color: theme.textSecondary
+                        color: radarTheme.textSecondary
                         font.family: "Adwaita Mono"
-                        font.pixelSize: theme.observationMetadataSize
+                        font.pixelSize: radarTheme.observationMetadataSize
                         font.weight: Font.Normal
                     }
                 }
 
                 ModuleDivider {
+                    palette: radarTheme
                     width: parent.width
                     lineOffsetY: -6
                 }
@@ -2167,7 +2157,7 @@ Scope {
                     id: radarViewport
                     width: parent.width
                     height: shell.radarViewportHeight
-                    color: theme.radarBackground
+                    color: radarTheme.radarBackground
                     clip: true
 
                     RadarFrameSet {
@@ -2187,7 +2177,7 @@ Scope {
                         visible: shell.radarAvailable
                         width: parent.width
                         height: 1
-                        color: theme.radarGrid
+                        color: radarTheme.radarGrid
                     }
 
                     Rectangle {
@@ -2195,7 +2185,7 @@ Scope {
                         visible: shell.radarAvailable
                         width: 1
                         height: parent.height
-                        color: theme.radarGrid
+                        color: radarTheme.radarGrid
                     }
 
                     Repeater {
@@ -2211,21 +2201,23 @@ Scope {
                             radius: width / 2
                             color: "transparent"
                             border.width: 1
-                            border.color: theme.radarRangeRing
+                            border.color: radarTheme.radarRangeRing
                         }
                     }
 
-                    Text {
+                    UI.GlassText {
+                        palette: radarTheme
                         anchors.centerIn: parent
                         visible: !shell.radarAvailable
                         text: shell.radarFetchFailed
                             ? "RADAR UNAVAILABLE" : "FETCHING RADAR…"
-                        color: theme.radarUnavailableText
+                        color: radarTheme.radarUnavailableText
                         font.family: "Adwaita Mono"
                         font.pixelSize: 13
                     }
 
-                    Text {
+                    UI.GlassText {
+                        palette: radarTheme
                         anchors {
                             left: parent.left
                             bottom: parent.bottom
@@ -2234,12 +2226,13 @@ Scope {
                         }
                         visible: shell.radarAvailable
                         text: shell.radarViewSummary + " · RANGE 2 / 5 KM"
-                        color: theme.textTertiary
+                        color: radarTheme.textTertiary
                         font.family: "Adwaita Mono"
                         font.pixelSize: 8
                     }
 
-                    Text {
+                    UI.GlassText {
+                        palette: radarTheme
                         id: jmaNowcastLink
 
                         anchors {
@@ -2250,8 +2243,8 @@ Scope {
                         }
                         textFormat: Text.StyledText
                         text: "<a href='https://www.jma.go.jp/bosai/nowc/'>JMA NOWCAST</a>"
-                        color: theme.textTertiary
-                        linkColor: theme.textMuted
+                        color: radarTheme.textTertiary
+                        linkColor: radarTheme.textMuted
                         font.family: "Adwaita Mono"
                         font.pixelSize: 8
                         onLinkActivated: link => Qt.openUrlExternally(link)
@@ -2265,7 +2258,7 @@ Scope {
                         }
                         visible: shell.radarAvailable
                         height: 6
-                        color: theme.radarTelemetryBackground
+                        color: radarTheme.radarTelemetryBackground
                         z: 2
 
                         Row {
@@ -2299,8 +2292,8 @@ Scope {
                                         }
                                         height: 2
                                         color: parent.active
-                                            ? theme.textPrimary
-                                            : theme.radarGrid
+                                            ? radarTheme.textPrimary
+                                            : radarTheme.radarGrid
                                     }
                                 }
                             }
@@ -2481,6 +2474,7 @@ Scope {
     }
 
     Component.onCompleted: {
+        shell.syncWidgetVisibility(true);
         shell.requestWeatherFetch();
         shell.scheduleNextWeatherFetch();
         shell.requestRadarRefreshNow();

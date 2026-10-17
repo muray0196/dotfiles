@@ -1,0 +1,77 @@
+diff --git a/src/Shaders.hpp b/src/Shaders.hpp
+--- a/src/Shaders.hpp
++++ b/src/Shaders.hpp
+@@ -385,6 +385,8 @@
+     float capDepth = clamp(-bevelSdf / max(1.5 * bezelWidthPx, 1.0), 0.0, 1.0);
+     vec2 capOutward = vec2(0.0, -1.0);
+     vec3 capNormal = vec3(0.0, 0.0, 1.0);
++    vec3 capRay = vec3(0.0, 0.0, -1.0);
++    float capBodyThickness = 0.0;
+     if (surfaceCurve > 0.001) {
+         capOutward = curvedOutwardNormal(uv);
+         float remaining = 1.0 - capDepth;
+@@ -395,6 +397,8 @@
+             // A smooth fourth-power cap rounds the thickness contours as
+             // well as the outline. Its analytic gradient drives all optics.
+             float capWidth = max(1.5 * bezelWidthPx, 1.0);
++            capBodyThickness = refractionStrength * capWidth
++                * (0.08 + surfaceCurve / 3.0);
+             vec2 p = uv * fullSize - glassBoxOffsetPx - glassBoxSizePx * 0.5;
+             vec2 axialDepth = glassBoxSizePx * 0.5 - abs(p);
+             vec2 tail = 1.0 - clamp(axialDepth / capWidth, 0.0, 1.0);
+@@ -412,9 +416,9 @@
+             if (gradientLength > 0.0001) capOutward = capGradient / gradientLength;
+         }
+         capNormal = normalize(vec3(capGradient, 1.0));
+-        vec3 ray = refract(vec3(0.0, 0.0, -1.0), capNormal, 1.0 / 1.45);
++        capRay = refract(vec3(0.0, 0.0, -1.0), capNormal, 1.0 / 1.45);
+         // Screen-space transmission through a shaped cap, not full ray tracing.
+-        baseOffset = ray.xy / max(-ray.z, 0.1) * opticalThickness * invFullSize;
++        baseOffset = capRay.xy / max(-capRay.z, 0.1) * opticalThickness * invFullSize;
+     }
+ 
+     // The settled displacement is exactly unchanged. During visibility
+@@ -594,17 +598,18 @@
+         float environmentLum = dot(environment, vec3(0.2126, 0.7152, 0.0722));
+         reflectedEnvironment = mix(vec3(environmentLum), environment, 0.92);
+         if (contourLighting) {
+-            // The rolled lip has a distinct return reflection. Its colour is
+-            // carried across the glass, not copied from the adjacent exterior
+-            // texel. This is a screen-space return path, not a fixed rim tint.
++            // A finite return footprint shares the transmitted ray and cap
++            // thickness. Three depth traversals approximate a round trip plus
++            // transmission; this is not a traced internal-reflection path.
+             float depth = -cornerSdf / max(monitorScale, 0.001);
+             if (depth < 12.0) {
+                 vec2 lipNormal = sdfOutwardNormal(uv);
+                 vec2 tangent = vec2(-lipNormal.y, lipNormal.x);
+-                vec2 boundaryUV = uv + lipNormal * max(-cornerSdf, 0.0) * invFullSize;
+                 vec2 axisReach = 0.45 * glassBoxSizePx / max(abs(capOutward), vec2(0.01));
+-                float returnReach = min(3.5 * bezelWidthPx, min(axisReach.x, axisReach.y));
+-                vec2 returnUV = boundaryUV - capOutward * returnReach * invFullSize;
++                vec2 pathOffset = capRay.xy / max(-capRay.z, 0.1)
++                    * (3.0 * capBodyThickness) * mix(0.82, 1.0, materialProgress);
++                float returnReach = min(length(pathOffset), min(axisReach.x, axisReach.y));
++                vec2 returnUV = uv - capOutward * returnReach * invFullSize;
+                 vec2 footprint = tangent * (0.18 * returnReach) * invFullSize;
+                 vec3 returned = 0.5 * texture(diffuseTex,
+                     clamp(toTexUV(toSampleBoxUV(returnUV)), 0.001, 0.999)).rgb;
+@@ -621,8 +626,16 @@
+                 float neutralLift = clamp((transmissionLum - 0.06 - returnLum)
+                     / max(1.0 - returnLum, 0.001), 0.0, 1.0);
+                 returned = mix(returned, vec3(1.0), neutralLift);
+-                float returnWeight = exp(-pow((depth - 2.2) / 3.3, 2.0));
+-                float amount = 0.96 * returnWeight * shapedReflection
++                // The same angular Fresnel term as the main cap controls the
++                // return's roll-off. Normalize against the straight-edge cap;
++                // 0.72 is an artistic ceiling, not a physical reflectance.
++                float grazing = pow(max(1.0 - capNormal.z, 0.0), 5.0);
++                float edgeCosine = inversesqrt(1.0 + surfaceCurve * surfaceCurve);
++                float edgeGrazing = pow(1.0 - edgeCosine, 5.0);
++                float angularReturn = clamp(grazing / max(edgeGrazing, 0.00001), 0.0, 1.0);
++                float returnWeight = exp(-pow((depth - 2.2) / 3.3, 2.0))
++                    * angularReturn * (1.0 - smoothstep(9.0, 12.0, depth));
++                float amount = 0.72 * returnWeight * shapedReflection
+                     * integratedLens * materialProgress;
+                 color = mix(color, returned, amount);
+                 reflectedEnvironment = mix(reflectedEnvironment, returned, returnWeight);

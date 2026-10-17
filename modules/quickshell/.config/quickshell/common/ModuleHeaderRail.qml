@@ -2,9 +2,10 @@ import QtQuick
 
 Rectangle {
     required property color tone
+    property bool compact: false
 
-    width: 3
-    height: 18
-    radius: 0
+    width: compact ? 5 : 3
+    height: compact ? 5 : 18
+    radius: compact ? height / 2 : 0
     color: tone
 }

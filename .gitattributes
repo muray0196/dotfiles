@@ -1,1 +1,4 @@
 * text=auto eol=lf
+
+# Empty context lines in unified patches require a space prefix.
+scripts/patches/*.patch whitespace=-blank-at-eol,-blank-at-eof

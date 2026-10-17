@@ -1,0 +1,49 @@
+--- a/src/Shaders.hpp
++++ b/src/Shaders.hpp
+@@ -754,12 +754,9 @@
+     }
+ 
+     // ========================================
+-    // Fixed shaped reflections: a narrow bright core and a soft shoulder, tied
+-    // to the same curved normal as refraction. No clock, pointer, or moving light.
++    // A narrow, background-coloured crest defines the silhouette. The rolled
++    // volume is expressed by refraction, without an added inner light band.
+     if (contourLighting) {
+-        // The narrow crest remains on the silhouette; its inward shoulder
+-        // follows the same curved surface normal as the refracted background.
+-        // Fixed area lights keep the resting desktop free of moving sheen.
+         float depth = -cornerSdf / max(monitorScale, 0.001);
+         if (capDepth < 1.0) {
+             vec2 normal = capOutward;
+@@ -768,29 +765,13 @@
+             float lowerLight = pow(max(-alignment, 0.0), 1.5);
+             float lighting = upperLight + lowerLight;
+             float core = exp(-pow((depth - 1.05) / 0.72, 2.0));
+-            float shoulder = pow(max(1.0 - capNormal.z, 0.0), 1.5)
+-                * (1.0 - smoothstep(0.0, 0.4, capDepth));
+             float strength = shapedReflection * integratedLens * materialProgress;
+ 
+             // Keep the environment's hue in the reflected radiance. The small
+             // neutral source is bounded; dark colours are never normalized.
+             vec3 light = 0.28 + 0.72 * reflectedEnvironment;
+-            float radiance = (2.0 * bevelStrength * core
+-                * (0.24 + 0.36 * (1.0 - blurredLum)) + 0.16 * shoulder)
+-                * lighting * strength;
+-            // A small area-light reflection sits on the rolled surface, not
+-            // on a constant-width outline. The shared 3D normal makes it move
+-            // inward on straight sides and wrap more tightly around corners.
+-            float elevation = dot(vec2(length(capNormal.xy), capNormal.z),
+-                normalize(vec2(0.8, 0.6)));
+-            // Let the angular lobe decay along the curved shoulder. Cutting it
+-            // at capDepth 0.4 left nonzero radiance at the branch boundary,
+-            // visible as an inner frame on uniform backgrounds. The final
+-            // smooth taper reaches zero only as the surface becomes flat.
+-            float meniscusLight = pow(max(elevation, 0.0), 20.0);
+-            radiance += 0.22 * bevelStrength * meniscusLight * strength
+-                * (0.3 + 0.7 * lighting)
+-                * (1.0 - smoothstep(0.75, 1.0, capDepth));
++            float radiance = 2.0 * bevelStrength * core
++                * (0.24 + 0.36 * (1.0 - blurredLum)) * lighting * strength;
+             color += light * radiance;
+ 
+             // A subdued return below the unlit lip provides definition on

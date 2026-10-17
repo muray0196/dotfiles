@@ -1,0 +1,503 @@
+--- a/src/Diagnostics.cpp
++++ b/src/Diagnostics.cpp
+@@ -3,6 +3,7 @@
+ #include "GlassDecoration.hpp"
+ #include "GlassSubsurfaceState.hpp"
+ #include "ItemHints.hpp"
++#include "LayerMaterialMotion.hpp"
+ 
+ #include <algorithm>
+ #include <array>
+@@ -572,10 +573,13 @@
+             if (rest == "items")
+                 return formatItems(format);
+ 
++            if (rest == "motion")
++                return LayerMaterialMotion::status();
++
+             if (rest == "status")
+                 return formatStatus(format);
+ 
+-            return "hyprglass: usage: hyprctl hyprglass <status|stats [reset]|items>  (add -j for JSON, e.g. hyprctl -j hyprglass status)\n";
++            return "hyprglass: usage: hyprctl hyprglass <status|stats [reset]|items|motion>  (add -j for JSON, e.g. hyprctl -j hyprglass status)\n";
+         },
+     });
+ }
+--- a/src/GlassLayerSurface.cpp
++++ b/src/GlassLayerSurface.cpp
+@@ -5,6 +5,7 @@
+ #include "GlassSnapshotElement.hpp"
+ #include "Globals.hpp"
+ #include "LayerGeometry.hpp"
++#include "LayerMaterialMotion.hpp"
+ #include "WorkspaceAnimation.hpp"
+ 
+ #include <algorithm>
+@@ -397,6 +398,17 @@
+         }
+ 
+         GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source);
++
++        // A second, wider scatter sample is only refreshed when the actual
++        // background changes. There is no GPU readback or continuous sampling.
++        const float adaptiveScatter = resolvePresetFloat(ctx, &SPresetValues::adaptiveScatter, &SOverridableConfig::adaptiveScatter, 0.0f);
++        if (adaptiveScatter > 0.0f) {
++            Vector2D diffusePadding;
++            GlassRenderer::sampleBackground(m_diffuseFramebuffer, xray ? snapshot : source, sampleBox, diffusePadding, 4);
++            GlassRenderer::blurBackground(m_diffuseFramebuffer, 6.0f, 2, source);
++        } else {
++            m_diffuseFramebuffer.reset();
++        }
+ 
+         m_hasCachedSample      = true;
+         m_cachedFromSnapshot   = xray;
+@@ -594,6 +606,11 @@
+     if (m_clearFramebuffer)
+         maskInfo.clearTextureId = m_clearFramebuffer->getTexture()->m_texID;
+ 
++    if (m_diffuseFramebuffer)
++        maskInfo.diffuseTextureId = m_diffuseFramebuffer->getTexture()->m_texID;
++    if (resolvePresetFloat(ctx, &SPresetValues::materialMotion, &SOverridableConfig::materialMotion, 0.0f) > 0.0f)
++        maskInfo.materialProgress = LayerMaterialMotion::progress(layerSurface->m_namespace);
++
+     // Draw behind the panel after capturing its background, so the shadow never
+     // feeds back into refraction. The padded layer pass bounds include this halo.
+     const float shadowStrength = resolvePresetFloat(ctx, &SPresetValues::shadowStrength, &SOverridableConfig::shadowStrength, 0.0f);
+@@ -604,7 +621,7 @@
+         CBox shadowBox = rawBox;
+         shadowBox.expand(range).translate({0.0, std::min(2.0 * scale, static_cast<double>(range))}).round();
+         const Config::CGradientValueData shadowColor{CHyprColor(0.0, 0.0, 0.0, shadowStrength)};
+-        g_pHyprOpenGL->renderRoundedShadow(shadowBox, static_cast<int>(std::round(cornerRadius)), roundingPower, range, shadowColor, alpha);
++        g_pHyprOpenGL->renderRoundedShadow(shadowBox, static_cast<int>(std::round(cornerRadius)), roundingPower, range, shadowColor, alpha * maskInfo.materialProgress);
+     }
+ 
+     // The glass shader composites both the glass effect and the surface content
+--- a/src/GlassLayerSurface.hpp
++++ b/src/GlassLayerSurface.hpp
+@@ -62,6 +62,7 @@
+     PHLLSREF     m_layerSurface;
+     SP<Render::IFramebuffer> m_sampleFramebuffer;
+     SP<Render::IFramebuffer> m_clearFramebuffer; // Unblurred, full-resolution lens sample.
++    SP<Render::IFramebuffer> m_diffuseFramebuffer; // Cached quarter-resolution broad scatter.
+     SP<Render::IFramebuffer> m_surfaceTempFramebuffer;
+     Vector2D     m_samplePaddingRatio;
+     bool         m_hasCachedSample = false;
+--- a/src/GlassRenderer.cpp
++++ b/src/GlassRenderer.cpp
+@@ -456,10 +456,17 @@
+     const bool hasClearSample = mask && mask->clearTextureId != 0;
+     glActiveTexture(GL_TEXTURE2);
+     glBindTexture(GL_TEXTURE_2D, hasClearSample ? mask->clearTextureId : 0);
++    const bool hasDiffuseSample = mask && mask->diffuseTextureId != 0;
++    glActiveTexture(GL_TEXTURE3);
++    glBindTexture(GL_TEXTURE_2D, hasDiffuseSample ? mask->diffuseTextureId : 0);
+     glActiveTexture(GL_TEXTURE0);
+ 
+     auto shader = g_pHyprOpenGL->useShader(shaderManager.glassShader);
+     glUniform1i(uniforms.clearTex, 2);
++    glUniform1i(uniforms.diffuseTex, 3);
++    glUniform1f(uniforms.adaptiveScatter, hasDiffuseSample
++        ? resolvePresetFloat(resolveContext, &SPresetValues::adaptiveScatter, &SOverridableConfig::adaptiveScatter, 0.0f) : 0.0f);
++    glUniform1f(uniforms.materialProgress, mask ? std::clamp(mask->materialProgress, 0.0f, 1.0f) : 1.0f);
+     glUniform1f(uniforms.edgeClarity, hasClearSample
+         ? resolvePresetFloat(resolveContext, &SPresetValues::edgeClarity, &SOverridableConfig::edgeClarity, 0.0f) : 0.0f);
+ 
+@@ -605,6 +612,8 @@
+     g_pHyprOpenGL->scissor(damageExtents.w > 0 && damageExtents.h > 0 ? damageExtents : rawBox);
+     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+     g_pHyprOpenGL->scissor(nullptr);
++    glActiveTexture(GL_TEXTURE3);
++    glBindTexture(GL_TEXTURE_2D, 0);
+     glActiveTexture(GL_TEXTURE2);
+     glBindTexture(GL_TEXTURE_2D, 0);
+     glActiveTexture(GL_TEXTURE0);
+--- a/src/GlassRenderer.hpp
++++ b/src/GlassRenderer.hpp
+@@ -62,6 +62,8 @@
+ // Windows do not use masking, they pass mask=nullptr to applyGlassEffect.
+ struct SMaskInfo {
+     GLuint   clearTextureId = 0; // Optional full-resolution background, texture unit 2.
++    GLuint   diffuseTextureId = 0; // Optional broad scatter, texture unit 3.
++    float    materialProgress = 1.0f;
+     GLuint   textureId;
+     GLenum   target;
+     Vector2D uvOffset; // mapping from glass box UV → full surface UV
+--- /dev/null
++++ b/src/LayerMaterialMotion.cpp
+@@ -0,0 +1,127 @@
++#include "LayerMaterialMotion.hpp"
++#include "GlassLayerSurface.hpp"
++#include "Globals.hpp"
++#include "LayerGeometry.hpp"
++
++#include <algorithm>
++#include <chrono>
++#include <format>
++#include <sstream>
++#include <unordered_map>
++#include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
++#include <hyprland/src/render/Renderer.hpp>
++extern "C" {
++#include <lauxlib.h>
++#include <lua.h>
++}
++
++namespace LayerMaterialMotion {
++namespace {
++using Clock = std::chrono::steady_clock;
++struct Transition {
++    float from = 1.0f;
++    float target = 1.0f;
++    Clock::time_point started{};
++    float durationMs = 0.0f;
++
++    float value() const {
++        if (durationMs <= 0.0f)
++            return target;
++        const float elapsed = std::chrono::duration<float, std::milli>(Clock::now() - started).count();
++        const float t = std::clamp(elapsed / durationMs, 0.0f, 1.0f);
++        const float eased = t * t * (3.0f - 2.0f * t);
++        return from + (target - from) * eased;
++    }
++    bool active() const {
++        return durationMs > 0.0f && from != target &&
++            std::chrono::duration<float, std::milli>(Clock::now() - started).count() < durationMs;
++    }
++};
++std::unordered_map<std::string, Transition> transitions;
++SP<CEventLoopTimer> timer;
++
++void damage(const std::string& layerNamespace) {
++    if (!g_pGlobalState || !g_pHyprRenderer)
++        return;
++    for (const auto& [key, state] : g_pGlobalState->layerSurfaces) {
++        const auto layer = state->getLayerSurface();
++        if (!layer || layer->m_namespace != layerNamespace)
++            continue;
++        const auto monitor = layer->m_monitor.lock();
++        auto box = LayerGeometry::computePaddedLogicalLayerBox(layer, monitor, GlassRenderer::SAMPLE_PADDING_PX);
++        if (box && monitor) {
++            box->translate(monitor->m_position);
++            g_pHyprRenderer->damageBox(*box);
++        }
++    }
++}
++}
++
++float progress(const std::string& layerNamespace) {
++    const auto it = transitions.find(layerNamespace);
++    return it == transitions.end() ? 1.0f : it->second.value();
++}
++
++static SDispatchResult dispatchVisibility(std::string request) {
++    std::istringstream input(request);
++    std::string name, action, extra;
++    input >> name >> action;
++    if ((name != "quickshell-clock" && name != "quickshell-performance") || (input >> extra) ||
++        (action != "show" && action != "hide" && action != "shown" && action != "hidden"))
++        return {.success = false, .error = "Expected a Quickshell namespace and show/hide/shown/hidden"};
++    const bool show = action == "show" || action == "shown";
++    const bool snap = action == "shown" || action == "hidden";
++    const auto found = transitions.find(name);
++    const float from = found == transitions.end() ? (show ? 0.0f : 1.0f) : found->second.value();
++    transitions[name] = {from, show ? 1.0f : 0.0f, Clock::now(), snap ? 0.0f : (show ? 220.0f : 180.0f)};
++    damage(name);
++    timer->updateTimeout(std::chrono::milliseconds(1));
++    return {};
++}
++
++void init(HANDLE handle) {
++    timer = makeShared<CEventLoopTimer>(std::nullopt,
++        [](SP<CEventLoopTimer> self, void*) {
++            bool active = false;
++            for (auto& [name, transition] : transitions) {
++                if (transition.durationMs <= 0.0f)
++                    continue;
++                damage(name); // Includes the final frame, so zero/one is actually drawn.
++                if (transition.active())
++                    active = true;
++                else {
++                    transition.from = transition.target;
++                    transition.durationMs = 0.0f;
++                }
++            }
++            self->updateTimeout(active ? std::optional<Time::steady_dur>{std::chrono::milliseconds(16)} : std::nullopt);
++        }, nullptr);
++    g_pEventLoopManager->addTimer(timer);
++    HyprlandAPI::addDispatcherV2(handle, "hyprglass:visibility", dispatchVisibility);
++    HyprlandAPI::addLuaFunction(handle, "hyprglass", "visibility", [](lua_State* L) -> int {
++        const char* name = luaL_checkstring(L, 1);
++        const char* action = luaL_checkstring(L, 2);
++        const auto result = dispatchVisibility(std::string(name) + " " + action);
++        if (!result.success)
++            return luaL_error(L, "%s", result.error.c_str());
++        return 0;
++    });
++}
++
++std::string status() {
++    return std::format("{{\"clock\":{:.5f},\"performance\":{:.5f},\"timerArmed\":{}}}\n",
++        progress("quickshell-clock"), progress("quickshell-performance"), timer && timer->armed());
++}
++
++void shutdown(HANDLE handle) {
++    HyprlandAPI::removeLuaFunction(handle, "hyprglass", "visibility");
++    HyprlandAPI::removeDispatcher(handle, "hyprglass:visibility");
++    if (timer) {
++        timer->cancel();
++        if (g_pEventLoopManager)
++            g_pEventLoopManager->removeTimer(timer);
++        timer.reset();
++    }
++    transitions.clear();
++}
++}
+--- /dev/null
++++ b/src/LayerMaterialMotion.hpp
+@@ -0,0 +1,12 @@
++#pragma once
++
++#include <hyprland/src/plugins/PluginAPI.hpp>
++#include <string>
++
++// Explicit, short-lived widget transitions, independent of global animations.
++namespace LayerMaterialMotion {
++void init(HANDLE handle);
++void shutdown(HANDLE handle);
++float progress(const std::string& layerNamespace);
++std::string status();
++}
+--- a/src/PluginConfig.cpp
++++ b/src/PluginConfig.cpp
+@@ -398,6 +398,8 @@
+     if (key == "layer_radius") { values.layerRadius = std::clamp(parsed, 0.0f, 48.0f); return true; }
+     if (key == "rim_width") { values.rimWidth = std::clamp(parsed, 0.0f, 40.0f); return true; }
+     if (key == "surface_curve") { values.surfaceCurve = std::clamp(parsed, 0.0f, 3.0f); return true; }
++    if (key == "adaptive_scatter") { values.adaptiveScatter = std::clamp(parsed, 0.0f, 1.0f); return true; }
++    if (key == "material_motion") { values.materialMotion = std::clamp(parsed, 0.0f, 1.0f); return true; }
+     if (key == "shadow_strength") { values.shadowStrength = std::clamp(parsed, 0.0f, 0.3f); return true; }
+     if (key == "shadow_size") { values.shadowSize = std::clamp(parsed, 0.0f, 20.0f); return true; }
+     if (key == "refraction_spread")    { values.refractionSpread = parsed; return true; }
+@@ -465,6 +467,8 @@
+     mergeFloat(target.layerRadius, overrides.layerRadius);
+     mergeFloat(target.rimWidth, overrides.rimWidth);
+     mergeFloat(target.surfaceCurve, overrides.surfaceCurve);
++    mergeFloat(target.adaptiveScatter, overrides.adaptiveScatter);
++    mergeFloat(target.materialMotion, overrides.materialMotion);
+     mergeFloat(target.shadowStrength, overrides.shadowStrength);
+     mergeFloat(target.shadowSize, overrides.shadowSize);
+     mergeFloat(target.refractionSpread, overrides.refractionSpread);
+--- a/src/PluginConfig.hpp
++++ b/src/PluginConfig.hpp
+@@ -236,6 +236,8 @@
+     Hyprlang::FLOAT* const* layerRadius         = nullptr; // Layer presets only.
+     Hyprlang::FLOAT* const* rimWidth            = nullptr; // Layer presets only.
+     Hyprlang::FLOAT* const* surfaceCurve        = nullptr; // Layer presets only.
++    Hyprlang::FLOAT* const* adaptiveScatter     = nullptr; // Layer presets only.
++    Hyprlang::FLOAT* const* materialMotion      = nullptr; // Layer presets only.
+     Hyprlang::FLOAT* const* shadowStrength      = nullptr; // Layer presets only.
+     Hyprlang::FLOAT* const* shadowSize          = nullptr; // Layer presets only.
+     Hyprlang::FLOAT* const* refractionSpread    = nullptr;
+@@ -277,6 +279,8 @@
+     float   layerRadius        = static_cast<float>(SENTINEL_FLOAT);
+     float   rimWidth           = static_cast<float>(SENTINEL_FLOAT);
+     float   surfaceCurve       = static_cast<float>(SENTINEL_FLOAT);
++    float   adaptiveScatter    = static_cast<float>(SENTINEL_FLOAT);
++    float   materialMotion     = static_cast<float>(SENTINEL_FLOAT);
+     float   shadowStrength     = static_cast<float>(SENTINEL_FLOAT);
+     float   shadowSize         = static_cast<float>(SENTINEL_FLOAT);
+     float   refractionSpread   = static_cast<float>(SENTINEL_FLOAT);
+--- a/src/ShaderManager.cpp
++++ b/src/ShaderManager.cpp
+@@ -51,6 +51,9 @@
+     glassUniforms.clearTex            = glGetUniformLocation(program, "clearTex");
+     glassUniforms.edgeClarity         = glGetUniformLocation(program, "edgeClarity");
+     glassUniforms.surfaceCurve        = glGetUniformLocation(program, "surfaceCurve");
++    glassUniforms.diffuseTex          = glGetUniformLocation(program, "diffuseTex");
++    glassUniforms.adaptiveScatter     = glGetUniformLocation(program, "adaptiveScatter");
++    glassUniforms.materialProgress    = glGetUniformLocation(program, "materialProgress");
+     glassUniforms.refractionSpread    = glGetUniformLocation(program, "refractionSpread");
+     glassUniforms.fresnelTint         = glGetUniformLocation(program, "fresnelTint");
+     glassUniforms.bevelStrength       = glGetUniformLocation(program, "bevelStrength");
+--- a/src/ShaderManager.hpp
++++ b/src/ShaderManager.hpp
+@@ -27,6 +27,9 @@
+     GLint clearTex = -1;
+     GLint edgeClarity = -1;
+     GLint surfaceCurve = -1;
++    GLint diffuseTex = -1;
++    GLint adaptiveScatter = -1;
++    GLint materialProgress = -1;
+     GLint fresnelTint = -1;
+     GLint bevelStrength = -1;
+     GLint bevelSize = -1;
+--- a/src/Shaders.hpp
++++ b/src/Shaders.hpp
+@@ -75,6 +75,9 @@
+ uniform sampler2D clearTex;
+ uniform float edgeClarity;
+ uniform float surfaceCurve;
++uniform sampler2D diffuseTex;
++uniform float adaptiveScatter;
++uniform float materialProgress;
+ uniform sampler2D maskTex;
+ uniform int useMask;
+ uniform vec2 maskUVOffset;
+@@ -265,6 +268,7 @@
+ 
+ void main() {
+     vec2 uv = v_texcoord;
++    if (materialProgress < 0.0001) { fragColor = vec4(0.0); return; }
+ 
+     // Layers only: sample the temp FBO to get the rendered surface pixel.
+     // Glass only covers visible content: layer pixels under the mask threshold get none.
+@@ -287,11 +291,11 @@
+                     break;
+                 }
+             }
+-            if (!insideRegion) { fragColor = surfacePixel; return; } // premultiplied, output as-is
++            if (!insideRegion) { fragColor = surfacePixel * materialProgress; return; } // premultiplied, output as-is
+         } else {
+             // Below the threshold the content gets no glass but is still drawn
+             // (shadows, faint fills), like outside a region.
+-            if (surfacePixel.a < maskAlphaThreshold) { fragColor = surfacePixel; return; } // premultiplied, output as-is
++            if (surfacePixel.a < maskAlphaThreshold) { fragColor = surfacePixel * materialProgress; return; } // premultiplied, output as-is
+             // Antialiased edges get proportionally less glass, so rounded corners fade
+             // out instead of ending on a hard, stepped edge. Not smoothstep(): it is undefined
+             // when threshold + coverage rounds to threshold in float.
+@@ -316,7 +320,7 @@
+         // "glass * coverage, surface over" blend, not a hard cutover — the
+         // actual blend happens in the hasMask composite at the bottom of main().
+         if (cornerAlpha < 0.001) {
+-            fragColor = surfacePixel;
++            fragColor = surfacePixel * materialProgress;
+             return;
+         }
+     } else {
+@@ -385,6 +389,10 @@
+         baseOffset = ray.xy / max(-ray.z, 0.1) * (refractionStrength * 60.0 * monitorScale) * invFullSize;
+     }
+ 
++    // The settled displacement is exactly unchanged. During visibility
++    // transitions, the lens eases through the final 18% of its optical depth.
++    baseOffset *= mix(0.82, 1.0, materialProgress);
++
+     // ========================================
+     // CHROMATIC ABERRATION — per-channel refraction scale
+     // Blue refracts more than red → natural spectral fringing at edges.
+@@ -428,6 +436,28 @@
+     }
+ 
+     // ========================================
++    // Adapt only the interior. Contrast is measured over the already softened
++    // background, avoiding a binary response to individual pixels or fine grain.
++    // A broad Gaussian sample supplies extra scatter where detail survives.
++    float adaptation = 0.0;
++    if (adaptiveScatter > 0.001) {
++        vec2 stepUV = vec2(16.0 * monitorScale) * invFullSize;
++        vec3 lo = color;
++        vec3 hi = color;
++        vec3 c1 = sampleBlurred(uvG + vec2(stepUV.x, 0.0)).rgb;
++        vec3 c2 = sampleBlurred(uvG - vec2(stepUV.x, 0.0)).rgb;
++        vec3 c3 = sampleBlurred(uvG + vec2(0.0, stepUV.y)).rgb;
++        vec3 c4 = sampleBlurred(uvG - vec2(0.0, stepUV.y)).rgb;
++        lo = min(lo, min(min(c1, c2), min(c3, c4)));
++        hi = max(hi, max(max(c1, c2), max(c3, c4)));
++        vec3 range = hi - lo;
++        float detail = max(range.r, max(range.g, range.b));
++        float interior = smoothstep(0.25, 0.95, capDepth);
++        adaptation = adaptiveScatter * smoothstep(0.06, 0.3, detail) * interior;
++        vec3 diffuse = texture(diffuseTex, clamp(toTexUV(toSampleBoxUV(uvG)), 0.001, 0.999)).rgb;
++        color = mix(color, diffuse, adaptation);
++    }
++
+     // A clear optical rim blends into the scattered-light interior. Both
+     // samples use exactly the same displacement, so detail never jumps at the join.
+     // This is layer-only and disabled unless the preset requests edge_clarity.
+@@ -459,6 +489,7 @@
+     // The sharp rim and soft interior share one tone response. A separate
+     // rim transmission boost makes saturated wallpaper look like a colored border.
+     color *= brightness * (1.0 - adaptiveDim * lumCurve);
++    color *= 1.0 - 0.12 * adaptation; // Gentle neutral backing under busy detail.
+ 
+     // Boost: additive lift — multiplicative can't brighten near-black content
+     color += vec3(adaptiveBoost * (1.0 - lumCurve) * 0.5);
+@@ -508,7 +539,7 @@
+         }
+ 
+         // the fresnel tint below reads the bevelled colour, so bevel the copy too
+-        float bevelLit = ring * facing * bevelStrength;
++        float bevelLit = ring * facing * bevelStrength * materialProgress;
+         float bevelDark = bevelShadow > 0.001 ? ring * (1.0 - facing) * bevelShadow : 0.0;
+         color = mix(mix(color, bevelLight, bevelLit), vec3(0.0), bevelDark);
+         tintSource = mix(mix(tintSource, bevelLight, bevelLit), vec3(0.0), bevelDark);
+@@ -532,7 +563,7 @@
+             float maxC = max(max(tintSource.r, tintSource.g), tintSource.b);
+             fresnelLight = mix(fresnelLight, maxC > 0.001 ? tintSource / maxC : vec3(1.0), fresnelTint);
+         }
+-        color += fresnelLight * fresnel;
++        color += fresnelLight * fresnel * materialProgress;
+     }
+ 
+     // ========================================
+@@ -554,7 +585,7 @@
+             spec = pow(max(dot(capNormal, halfVector), 0.0), 24.0)
+                 * (1.0 - smoothstep(0.6, 1.0, capDepth)) * specularStrength * 0.25;
+         }
+-        color += vec3(1.0, 0.99, 0.97) * spec;
++        color += vec3(1.0, 0.99, 0.97) * spec * materialProgress;
+     }
+ 
+     // ========================================
+@@ -587,12 +618,12 @@
+             : vec3(0.0);
+ 
+         // Hyprland's compositor expects premultiplied alpha (blend GL_ONE, GL_ONE_MINUS_SRC_ALPHA).
+-        fragColor = vec4(compRGB * compA, compA);
++        fragColor = vec4(compRGB * compA, compA) * materialProgress;
+     } else {
+         // Windows: output the glass effect alone, surface is rendered separately by Hyprland.
+         // Premultiplied: without this, a fading window's glass keeps full RGB contribution
+         // because the GL_ONE source factor adds raw color regardless of alpha.
+-        fragColor = vec4(color * glassA, glassA);
++        fragColor = vec4(color * glassA, glassA) * materialProgress;
+     }
+ }
+ )GLSL"},
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -12,6 +12,7 @@
+ #include "Globals.hpp"
+ #include "ItemHints.hpp"
+ #include "LoadGuard.hpp"
++#include "LayerMaterialMotion.hpp"
+ #include "PluginConfig.hpp"
+ #include "RenderGuards.hpp"
+ #include "SubsurfaceGeometry.hpp"
+@@ -855,6 +856,7 @@
+     registerConfig(PHANDLE);
+     initConfigPointers(PHANDLE, g_pGlobalState->config);
+     Diagnostics::registerHyprCtlCommand(PHANDLE);
++    LayerMaterialMotion::init(PHANDLE);
+ 
+     for (auto& window : Desktop::viewState()->windows()) {
+         if (window->isHidden() || !window->m_isMapped)
+@@ -941,6 +943,7 @@
+ 
+     g_pGlobalState->listeners.clear();
+     BackgroundDamageObserver::setEnabled(false);
++    LayerMaterialMotion::shutdown(PHANDLE);
+     Diagnostics::unregisterHyprCtlCommand(PHANDLE);
+ 
+     // drop the redirect and the sink's elements while the plugin is still mapped
+--- a/Makefile
++++ b/Makefile
+@@ -27,7 +27,7 @@
+ endif
+ 
+ TARGET = hyprglass.so
+-SOURCES = src/main.cpp src/LoadGuard.cpp src/GlassDecoration.cpp src/GlassPassElement.cpp src/GlassRenderer.cpp src/GlassLayerSurface.cpp src/GlassLayerPassElement.cpp src/GlassLayerCompositeElement.cpp src/BackgroundDamageObserver.cpp src/PluginConfig.cpp src/ShaderManager.cpp src/Diagnostics.cpp src/GlassSubsurfaceState.cpp src/GlassSubsurfacePassElement.cpp src/GlassSubsurfaceCompositeElement.cpp src/ItemHints.cpp src/GlassSnapshotElement.cpp
++SOURCES = src/main.cpp src/LayerMaterialMotion.cpp src/LoadGuard.cpp src/GlassDecoration.cpp src/GlassPassElement.cpp src/GlassRenderer.cpp src/GlassLayerSurface.cpp src/GlassLayerPassElement.cpp src/GlassLayerCompositeElement.cpp src/BackgroundDamageObserver.cpp src/PluginConfig.cpp src/ShaderManager.cpp src/Diagnostics.cpp src/GlassSubsurfaceState.cpp src/GlassSubsurfacePassElement.cpp src/GlassSubsurfaceCompositeElement.cpp src/ItemHints.cpp src/GlassSnapshotElement.cpp
+ OBJ = $(SOURCES:.cpp=.o)
+ HEADERS = $(wildcard src/*.hpp)
+ 

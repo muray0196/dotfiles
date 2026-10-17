@@ -1,0 +1,56 @@
+diff --git a/src/Shaders.hpp b/src/Shaders.hpp
+--- a/src/Shaders.hpp
++++ b/src/Shaders.hpp
+@@ -502,6 +502,10 @@
+         color = mix(color, sharp, rimClarity);
+     }
+ 
++    // Retain the scene colour so return reflections transport only spatial
++    // colour differences; a uniform backdrop must not gain a painted border.
++    vec3 transmittedScene = color;
++
+     // FROSTED TINT (per-theme tone mapping)
+     // ========================================
+     float blurredLum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+@@ -589,6 +593,41 @@
+         environment = clamp(environment, 0.0, 1.0);
+         float environmentLum = dot(environment, vec3(0.2126, 0.7152, 0.0722));
+         reflectedEnvironment = mix(vec3(environmentLum), environment, 0.92);
++        if (contourLighting) {
++            // The rolled lip has a distinct return reflection. Its colour is
++            // carried across the glass, not copied from the adjacent exterior
++            // texel. This is a screen-space return path, not a fixed rim tint.
++            float depth = -cornerSdf / max(monitorScale, 0.001);
++            if (depth < 12.0) {
++                vec2 lipNormal = sdfOutwardNormal(uv);
++                vec2 tangent = vec2(-lipNormal.y, lipNormal.x);
++                vec2 boundaryUV = uv + lipNormal * max(-cornerSdf, 0.0) * invFullSize;
++                vec2 axisReach = 0.45 * glassBoxSizePx / max(abs(capOutward), vec2(0.01));
++                float returnReach = min(3.5 * bezelWidthPx, min(axisReach.x, axisReach.y));
++                vec2 returnUV = boundaryUV - capOutward * returnReach * invFullSize;
++                vec2 footprint = tangent * (0.18 * returnReach) * invFullSize;
++                vec3 returned = 0.5 * texture(diffuseTex,
++                    clamp(toTexUV(toSampleBoxUV(returnUV)), 0.001, 0.999)).rgb;
++                returned += 0.25 * texture(diffuseTex,
++                    clamp(toTexUV(toSampleBoxUV(returnUV + footprint)), 0.001, 0.999)).rgb;
++                returned += 0.25 * texture(diffuseTex,
++                    clamp(toTexUV(toSampleBoxUV(returnUV - footprint)), 0.001, 0.999)).rgb;
++                returned = mix(reflectedEnvironment, clamp(returned, 0.0, 1.0), 0.96);
++                returned = clamp(color + returned - transmittedScene, 0.0, 1.0);
++                // Dark interior imagery may tint the rim, but must not produce
++                // a heavy black frame around an otherwise bright background.
++                float returnLum = dot(returned, vec3(0.2126, 0.7152, 0.0722));
++                float transmissionLum = dot(color, vec3(0.2126, 0.7152, 0.0722));
++                float neutralLift = clamp((transmissionLum - 0.06 - returnLum)
++                    / max(1.0 - returnLum, 0.001), 0.0, 1.0);
++                returned = mix(returned, vec3(1.0), neutralLift);
++                float returnWeight = exp(-pow((depth - 2.2) / 3.3, 2.0));
++                float amount = 0.96 * returnWeight * shapedReflection
++                    * integratedLens * materialProgress;
++                color = mix(color, returned, amount);
++                reflectedEnvironment = mix(reflectedEnvironment, returned, returnWeight);
++            }
++        }
+         float alignment = dot(capOutward, lightDir(bevelAngle));
+         reflectionLobe = pow(max(alignment, 0.0), 10.0)
+             + 0.28 * pow(max(-alignment, 0.0), 14.0);

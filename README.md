@@ -145,6 +145,97 @@ The module also provides `widgets-toggle`, which shows or hides the running
 `clock` and `performance` widgets together using Quickshell IPC. It uses the
 clock widget's visibility to choose the new state and requires `/usr/bin/qs`.
 
+Both widget columns use separate panels, with 12 px screen margins and
+10 px gaps between panels. Each panel remains 312 px wide, with the existing
+content padding. The glass effect follows each panel independently.
+
+The optional HyprGlass material has two everyday modes: **Clear** preserves the
+accepted transparent appearance, and **Blurred** softens the background more.
+Both use the same 44 px corners, refraction, highlights, colours, and local text
+contrast. Clear is the baseline for optical refinement. They require the
+[local optics22 build](docs/quickshell-glass.md).
+Run the helper without arguments to choose a mode in the optional `wofi` picker;
+Escape cancels without changing anything. Direct mode commands also work without
+`wofi`. Both columns change together, and successful choices survive login.
+
+For a separate native comparison with three circular playback controls, run
+`./scripts/quickshell-glass-reference.py` after building the optional reference
+variant described in [the glass guide](docs/quickshell-glass.md#reference-comparison-scene).
+It includes a reconstructed flower backdrop, plain backgrounds, a grid, and the
+supplied original reference. Close or Escape restores the desktop renderer.
+
+`clear` favours a clear interior, background-coloured edge reflections,
+and fixed neutral highlights following the curved surface. Edge-colour
+pickup follows the light path through a finite glass volume. Its curved front
+and shallower back surfaces compress and fold background detail through a wider
+rolled edge. A closer background plane limits excessive corner focusing, and
+the curved profiles blend the optical shoulder into the clear face.
+Compressed fine detail receives bounded footprint filtering. Narrow highlights
+are averaged over each pixel's surface angle, keeping corners more even.
+Reflected colour shares the transmission's tone response instead of receiving
+a separate white lift. The added inner light band is removed, keeping the rim and centre close
+in tone on uniform backgrounds. Internal-return colour develops gradually with
+the optical angle instead of switching on only near total reflection. Soft dimming follows text and
+separators so empty areas can stay clearer. Its broad sheen stays disabled.
+`blurred` inherits that material and changes only blur strength and iterations.
+The six information widgets use flat sans-serif type, aligned digits, quiet
+section dividers, an open calendar grid, and compact rounded indicators. All
+measurements and metadata remain visible. Rain Radar retains its previous content
+styling for a separate redesign. Soft local backing keeps text legible.
+The earlier experiments remain available: `soft` and `sculpted` use 22 px
+corners; `liquid`, `legacy-clear`, `smoky`, and `frosted` retain square geometry.
+`rounded` is a compatibility alias for the current `clear` mode. Older saved
+`rounded` selections restore as Clear; the earlier square `clear` fallback is
+now explicitly named `legacy-clear`.
+
+```bash
+./scripts/quickshell-glass.py          # two-choice picker (or use choose)
+./scripts/quickshell-glass.py clear
+./scripts/quickshell-glass.py blurred
+./scripts/quickshell-glass.py status
+./scripts/quickshell-glass.py restore
+./scripts/quickshell-glass.py off
+```
+
+For convenient access, bind the picker in your local Hyprland Lua configuration
+(choose an unused shortcut; no binding is installed by standard profiles):
+
+```lua
+hl.bind("SUPER + SHIFT + W", hl.dsp.exec_cmd("/absolute/path/to/dotfiles/scripts/quickshell-glass.py choose"))
+```
+
+This requires a separately built, matching HyprGlass plugin (`--plugin` accepts
+its path) and `glass.lua` sourced from the local Hyprland Lua configuration.
+For a deployed module, add `dofile(os.getenv("HOME") ..
+"/.config/quickshell/glass.lua")`; a repository checkout can be referenced
+directly instead. The helper prefers
+`~/.local/lib/quickshell-glass/hyprglass-0.10.0-optics22-0.56.2.so` when present,
+then earlier optics builds in descending version order, and `hyprglass-0.10.0-0.56.2.so` in the same directory.
+Adaptive curved treatments require optics22; `liquid` accepts all twenty-two optics builds. Applying a material
+reloads the Hyprland configuration to activate its preset definitions.
+Standard profiles do not install or activate the plugin. Glass affects only
+the two widget columns. Each successful selection is saved privately in
+`$XDG_STATE_HOME/dotfiles-linux/quickshell-glass-style` (defaulting to
+`~/.local/state/dotfiles-linux/quickshell-glass-style`); the runtime copy still
+supplies the active preset during configuration reloads. To restore the chosen
+material after login, explicitly add the helper's absolute path with `restore`
+to the existing Hyprland startup callback, after launching both widgets:
+
+```lua
+hl.exec_cmd("/absolute/path/to/dotfiles/scripts/quickshell-glass.py restore")
+```
+
+`restore` waits for both widgets before loading the plugin and applying the
+saved material. Without a saved selection it leaves the desktop unchanged.
+It can also be invoked after restarting the widget processes.
+`off` restores the original material, disables glass rendering, and remembers
+that choice for subsequent logins. A failed application preserves the previous
+successful selection for a later retry.
+Stock HyprGlass 0.10 can retain a removed background/bottom layer until its next
+background update. Reapplying a style refreshes that cache. The optics patch
+also invalidates remaining glass layers when a layer closes; continuous forced
+rendering stays off. Plugin installation and startup remain explicitly opt-in.
+
 Real credentials, location data, BLE identifiers, display hardware settings,
 and mutable automation state are local files and are never tracked. Create only
 the files needed for this machine from the adjacent `*.example.json` templates:

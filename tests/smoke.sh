@@ -52,6 +52,10 @@ python_path = root / "services/search-stack/scripts/search-and-crawl.py"
 compile(python_path.read_text(encoding="utf-8"), str(python_path), "exec")
 print("ok ", python_path.relative_to(root))
 
+python_path = root / "scripts/quickshell-glass-reference.py"
+compile(python_path.read_text(encoding="utf-8"), str(python_path), "exec")
+print("ok ", python_path.relative_to(root))
+
 for python_path in sorted((root / "services/search-stack/hermes-plugin").rglob("*.py")):
     compile(python_path.read_text(encoding="utf-8"), str(python_path), "exec")
     print("ok ", python_path.relative_to(root))
@@ -114,6 +118,7 @@ PY
 
 python3 "$ROOT/tests/test_search_stack_plugin.py"
 python3 -B "$ROOT/tests/test_freeze_recorder.py"
+python3 -B "$ROOT/tests/test_quickshell_glass.py"
 
 printf '\n== Profile resolution ==\n'
 DOTFILES_ROOT="$ROOT" bash <<'BASH'

@@ -1,5 +1,7 @@
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
+import Quickshell.Hyprland
 import QtQuick
 import "common" as UI
 
@@ -8,9 +10,46 @@ Scope {
 
     UI.Theme {
         id: theme
+        glassStyle: materialState.style
     }
 
-    property bool widgetsVisible: true
+    PersistentProperties {
+        id: materialState
+        reloadableId: "widget-material"
+        property string style: "off"
+        property bool shown: true
+        property bool motionReady: false
+    }
+
+    property alias widgetsVisible: materialState.shown
+    property bool widgetsMapped: false
+
+    // Only the widget material animates; global desktop animations stay untouched.
+    function syncWidgetVisibility(snap: bool): void {
+        widgetHideTimer.stop();
+        const animate = theme.curvedGlass && materialState.motionReady;
+        if (animate) {
+            const action = snap ? (widgetsVisible ? "shown" : "hidden")
+                : (widgetsVisible ? "show" : "hide");
+            if (Hyprland.usingLua)
+                Hyprland.dispatch('function() hl.plugin.hyprglass.visibility("quickshell-performance", "' + action + '") end');
+            else
+                Hyprland.dispatch("hyprglass:visibility quickshell-performance " + action);
+        }
+        if (widgetsVisible || snap || !animate)
+            widgetsMapped = widgetsVisible;
+        else
+            widgetHideTimer.restart();
+    }
+
+    onWidgetsVisibleChanged: syncWidgetVisibility(false)
+    Component.onCompleted: syncWidgetVisibility(true)
+
+    Timer {
+        id: widgetHideTimer
+        interval: 260 // Keep the surface alive through the renderer's 180 ms exit.
+        onTriggered: if (!shell.widgetsVisible) shell.widgetsMapped = false;
+    }
     readonly property string performanceScriptsDir:
         Quickshell.shellDir + "/scripts"
     readonly property string remoteConfigPath:
@@ -31,7 +70,7 @@ Scope {
     readonly property int performancePanelGap: 10
     readonly property int freshnessCautionMs: 6000
     readonly property int freshnessErrorMs: 30000
-    readonly property string smallLabelFont: "Adwaita Mono"
+    readonly property string smallLabelFont: theme.labelFont
     readonly property string numericFont: "Adwaita Sans"
     property double nowMs: Date.now()
 
@@ -612,6 +651,8 @@ Scope {
         target: "widgets"
 
         property bool visible: shell.widgetsVisible
+        readonly property string glassStyle: materialState.style
+        readonly property bool glassMotion: materialState.motionReady
 
         function showWidgets(): void {
             shell.widgetsVisible = true;
@@ -621,9 +662,23 @@ Scope {
             shell.widgetsVisible = false;
         }
 
+        function setGlassStyle(style: string): void {
+            if (["off", "smoky", "legacy-clear", "frosted", "liquid", "clear", "blurred", "rounded", "soft", "sculpted"].indexOf(style) !== -1)
+                materialState.style = style;
+            shell.syncWidgetVisibility(true);
+        }
+
+        function setGlassMotion(enabled: bool): void {
+            materialState.motionReady = enabled;
+            shell.syncWidgetVisibility(true);
+        }
+
     }
 
     component PanelEdge: Item {
+        // The curved material supplies its own continuous optical highlight.
+        visible: !theme.curvedGlass
+
         Rectangle {
             anchors {
                 top: parent.top
@@ -666,9 +721,12 @@ Scope {
     }
 
     component ModuleDivider: Item {
+        property bool lineVisible: true
         implicitHeight: shell.moduleDividerHeight
 
-        Rectangle {
+        UI.GlassSeparator {
+            visible: parent.lineVisible
+            palette: theme
             anchors.centerIn: parent
             width: parent.width
             height: 1
@@ -684,7 +742,7 @@ Scope {
         property bool available: false
 
         implicitHeight: 4
-        radius: 0
+        radius: height / 2
         color: theme.usageTrack
         opacity: available ? 1.0 : 0.3
 
@@ -698,7 +756,7 @@ Scope {
                 ? parent.width * Math.min(1, Math.max(0,
                     usageBar.value / 100))
                 : 0
-            radius: 0
+            radius: height / 2
             color: usageBar.accent
         }
     }
@@ -714,38 +772,41 @@ Scope {
 
         Item {
             width: parent.width
-            height: 11
+            height: 13
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 anchors.centerIn: parent
                 text: metricCell.label
                 color: theme.textMuted
                 font.family: shell.smallLabelFont
-                font.pixelSize: 9
+                font.pixelSize: 10
                 font.weight: Font.Medium
-                font.letterSpacing: 0.5
+                font.letterSpacing: 0
             }
         }
 
         Item {
             width: parent.width
-            height: metricValueRow.implicitHeight
+            height: 29
 
             Row {
                 id: metricValueRow
                 anchors.centerIn: parent
                 spacing: 2
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     id: metricValue
                     text: metricCell.valueText
                     color: theme.textPrimary
                     font.family: shell.numericFont
                     font.pixelSize: theme.metricValueSize
-                    font.weight: Font.Normal
+                    font.weight: Font.Medium
                 }
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     anchors.baseline: metricValue.baseline
                     text: metricCell.unitText
                     color: theme.textSecondary
@@ -769,6 +830,7 @@ Scope {
         implicitHeight: 24
 
         UI.ModuleHeaderRail {
+            compact: true
             anchors {
                 left: parent.left
                 verticalCenter: parent.verticalCenter
@@ -777,7 +839,8 @@ Scope {
                 moduleHeader.metrics, moduleHeader.staleIsUnknown)
         }
 
-        Text {
+        UI.GlassText {
+            palette: theme
             anchors {
                 left: parent.left
                 leftMargin: 10
@@ -786,8 +849,8 @@ Scope {
             text: moduleHeader.title
             color: theme.textPrimary
             font.family: shell.smallLabelFont
-            font.pixelSize: 17
-            font.weight: Font.Medium
+            font.pixelSize: 16
+            font.weight: Font.DemiBold
         }
 
         Column {
@@ -798,23 +861,25 @@ Scope {
             width: 138
             spacing: -1
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 width: parent.width
                 horizontalAlignment: Text.AlignRight
                 text: moduleHeader.platform
                 color: theme.textMuted
                 font.family: shell.smallLabelFont
-                font.pixelSize: 9
+                font.pixelSize: 10
                 font.weight: Font.Medium
             }
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 width: parent.width
                 horizontalAlignment: Text.AlignRight
                 text: moduleHeader.detail
                 color: theme.textSecondary
                 font.family: shell.smallLabelFont
-                font.pixelSize: 9
+                font.pixelSize: 10
                 font.weight: Font.Normal
                 elide: Text.ElideLeft
             }
@@ -834,13 +899,14 @@ Scope {
             width: parent.width
             spacing: -1
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 text: summaryTemperatureMetric.label
                 color: theme.textMuted
                 font.family: shell.smallLabelFont
-                font.pixelSize: 9
+                font.pixelSize: 10
                 font.weight: Font.Medium
             }
 
@@ -852,7 +918,8 @@ Scope {
                     anchors.centerIn: parent
                     spacing: 1
 
-                    Text {
+                    UI.GlassText {
+                        palette: theme
                         id: summaryTemperatureValue
 
                         text: historyStore.temperaturePeakText(
@@ -863,7 +930,8 @@ Scope {
                         font.weight: Font.Normal
                     }
 
-                    Text {
+                    UI.GlassText {
+                        palette: theme
                         anchors.baseline: summaryTemperatureValue.baseline
                         text: "°C"
                         color: theme.textMuted
@@ -885,7 +953,8 @@ Scope {
 
         implicitHeight: 19
 
-        Text {
+        UI.GlassText {
+            palette: theme
             anchors {
                 left: parent.left
                 leftMargin: 4
@@ -908,7 +977,8 @@ Scope {
             }
             spacing: 1
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 id: summaryTemperatureRowValue
 
                 text: historyStore.temperaturePeakText(
@@ -920,7 +990,8 @@ Scope {
                 font.weight: Font.Normal
             }
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 anchors.baseline: summaryTemperatureRowValue.baseline
                 text: "°C"
                 color: theme.textMuted
@@ -946,7 +1017,8 @@ Scope {
             anchors.fill: parent
             spacing: 0
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 width: parent.width
                 height: 14
                 horizontalAlignment: Text.AlignHCenter
@@ -965,7 +1037,7 @@ Scope {
                 SummaryTemperatureMetric {
                     anchors.fill: parent
                     visible: !summaryDeviceMetric.hotspotVisible
-                    label: "TEMP"
+                    label: "Temp"
                     samples: summaryDeviceMetric.temperatureSamples
                 }
 
@@ -979,7 +1051,7 @@ Scope {
                     SummaryTemperatureRow {
                         width: parent.width
                         height: Math.round(temperaturePair.height * 0.58)
-                        label: "EDGE"
+                        label: "Edge"
                         samples: summaryDeviceMetric.temperatureSamples
                         primaryValue: true
                     }
@@ -988,7 +1060,7 @@ Scope {
                         width: parent.width
                         height: temperaturePair.height
                             - Math.round(temperaturePair.height * 0.58)
-                        label: "HOTSPOT"
+                        label: "Hotspot"
                         samples: summaryDeviceMetric.hotspotSamples
                     }
                 }
@@ -1004,52 +1076,56 @@ Scope {
         property bool peakValue: false
         property bool primaryValue: false
 
-        implicitHeight: 19
+        implicitHeight: 39
 
-        Text {
-            anchors {
-                left: parent.left
-                leftMargin: 10
-                verticalCenter: parent.verticalCenter
-            }
-            text: summaryPowerValue.label
-            color: summaryPowerValue.primaryValue
-                ? theme.textSecondary : theme.textMuted
-            font.family: shell.smallLabelFont
-            font.pixelSize: 10
-            font.weight: summaryPowerValue.primaryValue
-                ? Font.Medium : Font.Normal
-        }
+        Column {
+            anchors.centerIn: parent
+            width: parent.width
+            spacing: 0
 
-        Row {
-            anchors {
-                right: parent.right
-                rightMargin: 10
-                verticalCenter: parent.verticalCenter
-            }
-            spacing: 1
-
-            Text {
-                id: aggregatePowerValue
-
-                text: summaryPowerValue.peakValue
-                    ? historyStore.powerPeakText(summaryPowerValue.samples)
-                    : historyStore.powerAverageText(
-                        summaryPowerValue.samples)
-                color: summaryPowerValue.primaryValue
-                    ? theme.textPrimary : theme.textSecondary
-                font.family: shell.numericFont
-                font.pixelSize: summaryPowerValue.primaryValue ? 21 : 15
-                font.weight: Font.Normal
-            }
-
-            Text {
-                anchors.baseline: aggregatePowerValue.baseline
-                text: "W"
+            UI.GlassText {
+                palette: theme
+                width: parent.width
+                height: 13
+                horizontalAlignment: Text.AlignHCenter
+                text: summaryPowerValue.label
                 color: theme.textMuted
                 font.family: shell.smallLabelFont
-                font.pixelSize: summaryPowerValue.primaryValue ? 10 : 9
+                font.pixelSize: 10
                 font.weight: Font.Medium
+            }
+
+            Item {
+                width: parent.width
+                height: 26
+
+                Row {
+                    anchors.centerIn: parent
+                    spacing: 2
+
+                    UI.GlassText {
+                        palette: theme
+                        id: aggregatePowerValue
+                        text: summaryPowerValue.peakValue
+                            ? historyStore.powerPeakText(summaryPowerValue.samples)
+                            : historyStore.powerAverageText(summaryPowerValue.samples)
+                        color: summaryPowerValue.primaryValue
+                            ? theme.textPrimary : theme.textSecondary
+                        font.family: shell.numericFont
+                        font.pixelSize: summaryPowerValue.primaryValue ? 21 : 18
+                        font.weight: summaryPowerValue.primaryValue
+                            ? Font.Medium : Font.Normal
+                    }
+
+                    UI.GlassText {
+                        palette: theme
+                        anchors.baseline: aggregatePowerValue.baseline
+                        text: "W"
+                        color: theme.textMuted
+                        font.family: shell.smallLabelFont
+                        font.pixelSize: 11
+                    }
+                }
             }
         }
     }
@@ -1072,7 +1148,8 @@ Scope {
                 width: parent.width
                 height: 18
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     anchors {
                         left: parent.left
                         leftMargin: 6
@@ -1085,7 +1162,8 @@ Scope {
                     font.weight: Font.Medium
                 }
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     anchors {
                         right: parent.right
                         rightMargin: 6
@@ -1094,12 +1172,12 @@ Scope {
                     text: summaryPowerMachine.sourceLabel
                     color: theme.textMuted
                     font.family: shell.smallLabelFont
-                    font.pixelSize: 9
+                    font.pixelSize: 10
                     font.weight: Font.Normal
                 }
             }
 
-            Column {
+            Row {
                 id: powerPair
 
                 width: parent.width
@@ -1107,18 +1185,17 @@ Scope {
                 spacing: 0
 
                 SummaryPowerValue {
-                    width: parent.width
-                    height: Math.round(powerPair.height * 0.59)
-                    label: "AVG"
+                    width: parent.width / 2
+                    height: parent.height
+                    label: "Avg"
                     samples: summaryPowerMachine.samples
                     primaryValue: true
                 }
 
                 SummaryPowerValue {
-                    width: parent.width
-                    height: powerPair.height
-                        - Math.round(powerPair.height * 0.59)
-                    label: "MAX"
+                    width: parent.width / 2
+                    height: parent.height
+                    label: "Max"
                     samples: summaryPowerMachine.samples
                     peakValue: true
                 }
@@ -1154,7 +1231,7 @@ Scope {
             + minimumPowerHeight
             + shell.moduleDividerHeight * 2
             + shell.panelInset * 2
-        radius: 0
+        radius: theme.panelRadius
         color: theme.panelBackground
         border.width: 0
 
@@ -1174,6 +1251,7 @@ Scope {
                 height: performanceSummaryPanel.headerHeight
 
                 UI.ModuleHeaderRail {
+                    compact: true
                     anchors {
                         left: parent.left
                         verticalCenter: parent.verticalCenter
@@ -1181,33 +1259,36 @@ Scope {
                     tone: performanceSummaryPanel.summaryTone
                 }
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     anchors {
                         left: parent.left
                         leftMargin: 10
                         verticalCenter: parent.verticalCenter
                     }
-                    text: "PERFORMANCE SUMMARY"
+                    text: "Performance summary"
                     color: theme.textPrimary
                     font.family: shell.smallLabelFont
-                    font.pixelSize: 17
-                    font.weight: Font.Medium
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
                 }
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     anchors {
                         right: parent.right
                         verticalCenter: parent.verticalCenter
                     }
-                    text: "10 MIN"
+                    text: "10 min"
                     color: theme.textMuted
                     font.family: shell.smallLabelFont
-                    font.pixelSize: 9
+                    font.pixelSize: 10
                     font.weight: Font.Medium
                 }
             }
 
             ModuleDivider {
+                lineVisible: false
                 width: parent.width
             }
 
@@ -1215,8 +1296,8 @@ Scope {
                 width: parent.width
                 palette: theme
                 height: performanceSummaryPanel.sectionHeaderHeight
-                label: "PEAK TEMPERATURE"
-                metadata: "10 MIN MAX"
+                label: "Peak temperature"
+                metadata: "10 min max"
             }
 
             Item {
@@ -1239,17 +1320,19 @@ Scope {
                             }
                             width: 5
                             height: 5
+                            radius: height / 2
                             color: performanceSummaryPanel.localFresh
                                 ? theme.statusOk : theme.textDisabled
                         }
 
-                        Text {
+                        UI.GlassText {
+                            palette: theme
                             anchors {
                                 left: parent.left
                                 leftMargin: 9
                                 verticalCenter: parent.verticalCenter
                             }
-                            text: "LOCAL"
+                            text: "Local"
                             color: performanceSummaryPanel.localFresh
                                 ? theme.textPrimary : theme.textDisabled
                             font.family: shell.smallLabelFont
@@ -1313,17 +1396,19 @@ Scope {
                             }
                             width: 5
                             height: 5
+                            radius: height / 2
                             color: performanceSummaryPanel.mainFresh
                                 ? theme.statusOk : theme.textDisabled
                         }
 
-                        Text {
+                        UI.GlassText {
+                            palette: theme
                             anchors {
                                 left: parent.left
                                 leftMargin: 9
                                 verticalCenter: parent.verticalCenter
                             }
-                            text: "MAIN"
+                            text: "Main"
                             color: performanceSummaryPanel.mainFresh
                                 ? theme.textPrimary : theme.textDisabled
                             font.family: shell.smallLabelFont
@@ -1360,8 +1445,8 @@ Scope {
                 width: parent.width
                 palette: theme
                 height: performanceSummaryPanel.sectionHeaderHeight
-                label: "COMPUTE POWER"
-                metadata: "AVG / MAX"
+                label: "Compute power"
+                metadata: "Avg / Max"
             }
 
             Item {
@@ -1375,8 +1460,8 @@ Scope {
                     SummaryPowerMachine {
                         width: parent.width / 2
                         height: parent.height
-                        machineLabel: "LOCAL"
-                        sourceLabel: "CPU + GPU1 + GPU2"
+                        machineLabel: "Local"
+                        sourceLabel: "CPU+GPU1+GPU2"
                         samples: historyStore.localComputePower
                         labelTone: performanceSummaryPanel.localFresh
                             ? theme.textPrimary : theme.textDisabled
@@ -1385,15 +1470,17 @@ Scope {
                     SummaryPowerMachine {
                         width: parent.width / 2
                         height: parent.height
-                        machineLabel: "MAIN"
-                        sourceLabel: "CPU + GPU"
+                        machineLabel: "Main"
+                        sourceLabel: "CPU+GPU"
                         samples: historyStore.mainComputePower
                         labelTone: performanceSummaryPanel.mainFresh
                             ? theme.textPrimary : theme.textDisabled
                     }
                 }
 
-                Rectangle {
+                UI.GlassSeparator {
+                    palette: theme
+                    vertical: true
                     anchors {
                         horizontalCenter: parent.horizontalCenter
                         verticalCenter: parent.verticalCenter
@@ -1438,7 +1525,7 @@ Scope {
 
             MetricCell {
                 width: parent.width / 3
-                label: "LOAD"
+                label: "Load"
                 valueText: shell.percentageValue(
                     computeSection.usage,
                     computeSection.available
@@ -1448,14 +1535,14 @@ Scope {
 
             MetricCell {
                 width: parent.width / 3
-                label: "TEMP"
+                label: "Temp"
                 valueText: shell.metricValue(computeSection.temperatureValue)
                 unitText: "°C"
             }
 
             MetricCell {
                 width: parent.width / 3
-                label: "POWER"
+                label: "Power"
                 valueText: shell.metricValue(computeSection.powerValue)
                 unitText: "W"
             }
@@ -1484,6 +1571,7 @@ Scope {
         spacing: 0
 
         ModuleDivider {
+            lineVisible: false
             width: parent.width
             visible: localComputeDevice.divided
         }
@@ -1507,7 +1595,7 @@ Scope {
 
                 MetricCell {
                     width: parent.width / 3
-                    label: "LOAD"
+                    label: "Load"
                     valueText: shell.percentageValue(
                         localComputeDevice.usage,
                         localComputeDevice.available
@@ -1517,7 +1605,7 @@ Scope {
 
                 MetricCell {
                     width: parent.width / 3
-                    label: "TEMP"
+                    label: "Temp"
                     valueText: shell.metricValue(
                         localComputeDevice.temperatureValue)
                     unitText: "°C"
@@ -1525,7 +1613,7 @@ Scope {
 
                 MetricCell {
                     width: parent.width / 3
-                    label: "POWER"
+                    label: "Power"
                     valueText: shell.metricValue(
                         localComputeDevice.powerValue)
                     unitText: "W"
@@ -1611,28 +1699,30 @@ Scope {
 
         Item {
             width: parent.width
-            height: 11
+            height: 13
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 anchors.centerIn: parent
                 text: localMemoryMetric.label
                 color: theme.textMuted
                 font.family: shell.smallLabelFont
-                font.pixelSize: 9
+                font.pixelSize: 10
                 font.weight: Font.Medium
             }
         }
 
         Item {
             width: parent.width
-            height: localMemoryValueRow.implicitHeight
+            height: 29
 
             Row {
                 id: localMemoryValueRow
                 anchors.centerIn: parent
                 spacing: 2
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     id: localMemoryValue
                     text: shell.percentageValue(
                         localMemoryMetric.usage,
@@ -1642,10 +1732,11 @@ Scope {
                         ? theme.textPrimary : theme.textDisabled
                     font.family: shell.numericFont
                     font.pixelSize: theme.metricValueSize
-                    font.weight: Font.Normal
+                    font.weight: Font.Medium
                 }
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     anchors.baseline: localMemoryValue.baseline
                     text: "%"
                     color: localMemoryMetric.available
@@ -1661,7 +1752,8 @@ Scope {
             width: parent.width
             height: 13
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 anchors.centerIn: parent
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
@@ -1673,7 +1765,7 @@ Scope {
                 color: localMemoryMetric.available
                     ? theme.textSecondary : theme.textDisabled
                 font.family: shell.smallLabelFont
-                font.pixelSize: 9
+                font.pixelSize: 10
                 font.weight: Font.Normal
                 elide: Text.ElideRight
             }
@@ -1709,7 +1801,7 @@ Scope {
         UI.SectionHeader {
             width: parent.width
             palette: theme
-            label: "MEMORY"
+            label: "Memory"
         }
 
         Flow {
@@ -1775,7 +1867,8 @@ Scope {
             width: parent.width
             height: 18
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 anchors {
                     left: parent.left
                     verticalCenter: parent.verticalCenter
@@ -1788,7 +1881,8 @@ Scope {
                 font.weight: Font.Medium
             }
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 anchors {
                     right: parent.right
                     verticalCenter: parent.verticalCenter
@@ -1830,12 +1924,12 @@ Scope {
         UI.SectionHeader {
             width: parent.width
             palette: theme
-            label: "STORAGE"
+            label: "Storage"
         }
 
         LocalCapacityRow {
             width: parent.width
-            label: "ROOT"
+            label: "Root"
             available: localStorageSection.metrics.storageAvailable
             used: localStorageSection.metrics.storageUsed
             total: localStorageSection.metrics.storageTotal
@@ -1879,7 +1973,7 @@ Scope {
         UI.SectionHeader {
             width: parent.width
             palette: theme
-            label: "NETWORK"
+            label: "Network"
             metadata: networkSection.metrics.networkInterface !== ""
                 ? networkSection.metrics.networkInterface
                 : "INTERFACE --"
@@ -1890,7 +1984,7 @@ Scope {
 
             MetricCell {
                 width: parent.width / 2
-                label: "DOWNLOAD"
+                label: "Download"
                 valueText: "↓ " + shell.byteRateValue(
                     networkSection.metrics.networkDownload,
                     networkSection.metrics.networkAvailable
@@ -1903,7 +1997,7 @@ Scope {
 
             MetricCell {
                 width: parent.width / 2
-                label: "UPLOAD"
+                label: "Upload"
                 valueText: "↑ " + shell.byteRateValue(
                     networkSection.metrics.networkUpload,
                     networkSection.metrics.networkAvailable
@@ -1932,7 +2026,8 @@ Scope {
             width: parent.width
             height: 30
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 anchors {
                     left: parent.left
                     top: parent.top
@@ -1952,7 +2047,8 @@ Scope {
                 }
                 spacing: 2
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     id: memoryPercent
                     text: shell.percentageValue(
                         memoryPair.usage,
@@ -1961,10 +2057,11 @@ Scope {
                     color: theme.textPrimary
                     font.family: shell.numericFont
                     font.pixelSize: theme.metricValueSize
-                    font.weight: Font.Normal
+                    font.weight: Font.Medium
                 }
 
-                Text {
+                UI.GlassText {
+                    palette: theme
                     anchors.baseline: memoryPercent.baseline
                     text: "%"
                     color: theme.textSecondary
@@ -1973,7 +2070,8 @@ Scope {
                 }
             }
 
-            Text {
+            UI.GlassText {
+                palette: theme
                 anchors {
                     left: parent.left
                     bottom: parent.bottom
@@ -1985,7 +2083,7 @@ Scope {
                 )
                 color: theme.textSecondary
                 font.family: shell.smallLabelFont
-                font.pixelSize: 9
+                font.pixelSize: 10
                 font.weight: Font.Normal
             }
         }
@@ -2009,7 +2107,7 @@ Scope {
         UI.SectionHeader {
             width: parent.width
             palette: theme
-            label: "MEMORY"
+            label: "Memory"
             metadata: "RAM · VRAM"
         }
 
@@ -2055,7 +2153,7 @@ Scope {
         implicitWidth: shell.panelWidth
         implicitHeight: localSystemContent.implicitHeight
             + shell.panelInset * 2
-        radius: 0
+        radius: theme.panelRadius
         color: theme.panelBackground
         border.width: 0
 
@@ -2068,8 +2166,8 @@ Scope {
             ModuleHeader {
                 width: parent.width
                 metrics: localSystemPanel.metrics
-                title: "LOCAL SYSTEM"
-                platform: "ARCH LINUX"
+                title: "Local system"
+                platform: "Arch Linux"
                 detail: shell.uptime(
                     localSystemPanel.metrics.uptimeSeconds,
                     localSystemPanel.metrics.uptimeAvailable
@@ -2077,6 +2175,7 @@ Scope {
             }
 
             ModuleDivider {
+                lineVisible: false
                 width: parent.width
             }
 
@@ -2130,7 +2229,7 @@ Scope {
         implicitWidth: shell.panelWidth
         implicitHeight: remoteSystemContent.implicitHeight
             + shell.panelInset * 2
-        radius: 0
+        radius: theme.panelRadius
         color: theme.panelBackground
         border.width: 0
 
@@ -2144,8 +2243,8 @@ Scope {
                 width: parent.width
                 metrics: remoteSystemPanel.metrics
                 staleIsUnknown: true
-                title: "MAIN PC"
-                platform: "WINDOWS"
+                title: "Main PC"
+                platform: "Windows"
                 detail: remoteSystemPanel.metrics.available
                     ? "HOST "
                         + (remoteSystemPanel.metrics.host !== ""
@@ -2155,6 +2254,7 @@ Scope {
             }
 
             ModuleDivider {
+                lineVisible: false
                 width: parent.width
             }
 
@@ -2209,73 +2309,73 @@ Scope {
         }
     }
 
+    // Each card has its own surface so glass follows the restored panel shape.
     PanelWindow {
-        visible: shell.widgetsVisible
-
-        anchors {
-            top: true
-            bottom: true
-            left: true
-        }
-
-        margins {
-            top: 12
-            bottom: 12
-            left: 12
-        }
-
+        id: localWindow
+        visible: shell.widgetsMapped
+        WlrLayershell.namespace: "quickshell-performance"
+        anchors { top: true; left: true }
+        margins { top: 12; left: 12 }
         implicitWidth: shell.panelWidth
+        implicitHeight: localSystem.implicitHeight
         color: "transparent"
         exclusiveZone: 0
         focusable: false
         mask: Region {}
 
-        Item {
-            id: cards
-
+        LocalSystemPanel {
+            id: localSystem
             anchors.fill: parent
+            metrics: localData
+        }
+    }
 
-            LocalSystemPanel {
-                id: localSystem
+    PanelWindow {
+        id: mainWindow
+        visible: shell.widgetsMapped
+        WlrLayershell.namespace: "quickshell-performance"
+        anchors { top: true; left: true }
+        margins {
+            top: localWindow.margins.top + localWindow.implicitHeight + shell.performancePanelGap
+            left: 12
+        }
+        implicitWidth: shell.panelWidth
+        implicitHeight: mainSystem.implicitHeight
+        color: "transparent"
+        exclusiveZone: 0
+        focusable: false
+        mask: Region {}
 
-                anchors {
-                    top: parent.top
-                    left: parent.left
-                    right: parent.right
-                }
-                metrics: localData
-            }
+        RemoteSystemPanel {
+            id: mainSystem
+            anchors.fill: parent
+            metrics: remoteData
+        }
+    }
 
-            RemoteSystemPanel {
-                id: mainSystem
+    PanelWindow {
+        id: summaryWindow
+        visible: shell.widgetsMapped
+        WlrLayershell.namespace: "quickshell-performance"
+        anchors { top: true; bottom: true; left: true }
+        margins {
+            top: mainWindow.margins.top + mainWindow.implicitHeight + shell.performancePanelGap
+            bottom: 12
+            left: 12
+        }
+        implicitWidth: shell.panelWidth
+        implicitHeight: summaryPanel.implicitHeight
+        color: "transparent"
+        exclusiveZone: 0
+        focusable: false
+        mask: Region {}
 
-                anchors {
-                    top: localSystem.bottom
-                    topMargin: shell.performancePanelGap
-                    left: parent.left
-                    right: parent.right
-                }
-                metrics: remoteData
-            }
-
-            PerformanceSummaryPanel {
-                anchors {
-                    top: mainSystem.bottom
-                    topMargin: shell.performancePanelGap
-                    bottom: parent.bottom
-                    left: parent.left
-                    right: parent.right
-                }
-                localMetrics: localData
-                mainMetrics: remoteData
-                bodyExtraHeight: Math.max(0,
-                    cards.height
-                    - localSystem.implicitHeight
-                    - mainSystem.implicitHeight
-                    - shell.performancePanelGap * 2
-                    - implicitHeight
-                )
-            }
+        PerformanceSummaryPanel {
+            id: summaryPanel
+            anchors.fill: parent
+            localMetrics: localData
+            mainMetrics: remoteData
+            bodyExtraHeight: Math.max(0, summaryWindow.height - implicitHeight)
         }
     }
 

@@ -1,0 +1,194 @@
+--- a/src/PluginConfig.hpp
++++ b/src/PluginConfig.hpp
+@@ -232,6 +232,7 @@
+     Hyprlang::FLOAT* const* adaptiveDim         = nullptr;
+     Hyprlang::FLOAT* const* adaptiveBoost       = nullptr;
+     Hyprlang::FLOAT* const* refractionFlow      = nullptr;
++    Hyprlang::FLOAT* const* edgeClarity         = nullptr; // Preset-only; no global override.
+     Hyprlang::FLOAT* const* refractionSpread    = nullptr;
+     Hyprlang::FLOAT* const* fresnelTint         = nullptr;
+     Hyprlang::FLOAT* const* bevelStrength       = nullptr;
+@@ -267,6 +268,7 @@
+     float   adaptiveDim        = static_cast<float>(SENTINEL_FLOAT);
+     float   adaptiveBoost      = static_cast<float>(SENTINEL_FLOAT);
+     float   refractionFlow     = static_cast<float>(SENTINEL_FLOAT);
++    float   edgeClarity        = static_cast<float>(SENTINEL_FLOAT); // Layer presets only.
+     float   refractionSpread   = static_cast<float>(SENTINEL_FLOAT);
+     float   fresnelTint        = static_cast<float>(SENTINEL_FLOAT);
+     float   bevelStrength      = static_cast<float>(SENTINEL_FLOAT);
+--- a/src/PluginConfig.cpp
++++ b/src/PluginConfig.cpp
+@@ -394,6 +394,7 @@
+     if (key == "adaptive_dim")         { values.adaptiveDim = parsed; return true; }
+     if (key == "adaptive_boost")       { values.adaptiveBoost = parsed; return true; }
+     if (key == "refraction_flow")      { values.refractionFlow = parsed; return true; }
++    if (key == "edge_clarity")         { values.edgeClarity = std::clamp(parsed, 0.0f, 1.0f); return true; }
+     if (key == "refraction_spread")    { values.refractionSpread = parsed; return true; }
+     if (key == "fresnel_tint")         { values.fresnelTint = parsed; return true; }
+     if (key == "bevel_strength")       { values.bevelStrength = parsed; return true; }
+@@ -455,6 +456,7 @@
+     mergeFloat(target.adaptiveDim, overrides.adaptiveDim);
+     mergeFloat(target.adaptiveBoost, overrides.adaptiveBoost);
+     mergeFloat(target.refractionFlow, overrides.refractionFlow);
++    mergeFloat(target.edgeClarity, overrides.edgeClarity);
+     mergeFloat(target.refractionSpread, overrides.refractionSpread);
+     mergeFloat(target.fresnelTint, overrides.fresnelTint);
+     mergeFloat(target.bevelStrength, overrides.bevelStrength);
+--- a/src/GlassLayerSurface.hpp
++++ b/src/GlassLayerSurface.hpp
+@@ -61,6 +61,7 @@
+   private:
+     PHLLSREF     m_layerSurface;
+     SP<Render::IFramebuffer> m_sampleFramebuffer;
++    SP<Render::IFramebuffer> m_clearFramebuffer; // Unblurred, full-resolution lens sample.
+     SP<Render::IFramebuffer> m_surfaceTempFramebuffer;
+     Vector2D     m_samplePaddingRatio;
+     bool         m_hasCachedSample = false;
+--- a/src/GlassLayerSurface.cpp
++++ b/src/GlassLayerSurface.cpp
+@@ -375,6 +375,16 @@
+         int downscale        = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
+ 
+         GlassRenderer::sampleBackground(m_sampleFramebuffer, xray ? snapshot : source, sampleBox, m_samplePaddingRatio, downscale);
++
++        // Keep a sharp sample for the rim, independently of the readable interior.
++        // The padding ratio is resolution-independent for the same sampleBox.
++        const float edgeClarity = resolvePresetFloat(ctx, &SPresetValues::edgeClarity, &SOverridableConfig::edgeClarity, 0.0f);
++        if (edgeClarity > 0.0f) {
++            Vector2D clearPadding;
++            GlassRenderer::sampleBackground(m_clearFramebuffer, xray ? snapshot : source, sampleBox, clearPadding, 1);
++        } else {
++            m_clearFramebuffer.reset();
++        }
+ 
+         float blurRadius     = blurStrength * 12.0f / downscale;
+         int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(ctx, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
+@@ -576,6 +586,9 @@
+             break;
+     }
+ 
++    if (m_clearFramebuffer)
++        maskInfo.clearTextureId = m_clearFramebuffer->getTexture()->m_texID;
++
+     // The glass shader composites both the glass effect and the surface content
+     // in a single pass: glass behind, surface on top, using the temp FBO alpha.
+     GlassRenderer::applyGlassEffect(m_sampleFramebuffer, target,
+--- a/src/GlassRenderer.hpp
++++ b/src/GlassRenderer.hpp
+@@ -61,6 +61,7 @@
+ // Constrains the glass effect to regions where the layer has visible content.
+ // Windows do not use masking, they pass mask=nullptr to applyGlassEffect.
+ struct SMaskInfo {
++    GLuint   clearTextureId = 0; // Optional full-resolution background, texture unit 2.
+     GLuint   textureId;
+     GLenum   target;
+     Vector2D uvOffset; // mapping from glass box UV → full surface UV
+--- a/src/ShaderManager.hpp
++++ b/src/ShaderManager.hpp
+@@ -24,6 +24,8 @@
+     GLint adaptiveBoost = -1;
+     GLint refractionFlow = -1;
+     GLint refractionSpread = -1;
++    GLint clearTex = -1;
++    GLint edgeClarity = -1;
+     GLint fresnelTint = -1;
+     GLint bevelStrength = -1;
+     GLint bevelSize = -1;
+--- a/src/ShaderManager.cpp
++++ b/src/ShaderManager.cpp
+@@ -48,6 +48,8 @@
+     glassUniforms.adaptiveDim         = glGetUniformLocation(program, "adaptiveDim");
+     glassUniforms.adaptiveBoost       = glGetUniformLocation(program, "adaptiveBoost");
+     glassUniforms.refractionFlow      = glGetUniformLocation(program, "refractionFlow");
++    glassUniforms.clearTex            = glGetUniformLocation(program, "clearTex");
++    glassUniforms.edgeClarity         = glGetUniformLocation(program, "edgeClarity");
+     glassUniforms.refractionSpread    = glGetUniformLocation(program, "refractionSpread");
+     glassUniforms.fresnelTint         = glGetUniformLocation(program, "fresnelTint");
+     glassUniforms.bevelStrength       = glGetUniformLocation(program, "bevelStrength");
+--- a/src/GlassRenderer.cpp
++++ b/src/GlassRenderer.cpp
+@@ -452,7 +452,16 @@
+         glActiveTexture(GL_TEXTURE0);
+     }
+ 
++    // Optional layer-only sharp background. Other users retain the original path.
++    const bool hasClearSample = mask && mask->clearTextureId != 0;
++    glActiveTexture(GL_TEXTURE2);
++    glBindTexture(GL_TEXTURE_2D, hasClearSample ? mask->clearTextureId : 0);
++    glActiveTexture(GL_TEXTURE0);
++
+     auto shader = g_pHyprOpenGL->useShader(shaderManager.glassShader);
++    glUniform1i(uniforms.clearTex, 2);
++    glUniform1f(uniforms.edgeClarity, hasClearSample
++        ? resolvePresetFloat(resolveContext, &SPresetValues::edgeClarity, &SOverridableConfig::edgeClarity, 0.0f) : 0.0f);
+ 
+     shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, glMatrix.getMatrix());
+     shader->setUniformInt(SHADER_TEX, 0);
+@@ -589,6 +598,9 @@
+     g_pHyprOpenGL->scissor(damageExtents.w > 0 && damageExtents.h > 0 ? damageExtents : rawBox);
+     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+     g_pHyprOpenGL->scissor(nullptr);
++    glActiveTexture(GL_TEXTURE2);
++    glBindTexture(GL_TEXTURE_2D, 0);
++    glActiveTexture(GL_TEXTURE0);
+ }
+ 
+ } // namespace GlassRenderer
+--- a/src/Shaders.hpp
++++ b/src/Shaders.hpp
+@@ -72,6 +72,8 @@
+ uniform float bevelShadow;
+ uniform float specularAngle;
+ 
++uniform sampler2D clearTex;
++uniform float edgeClarity;
+ uniform sampler2D maskTex;
+ uniform int useMask;
+ uniform vec2 maskUVOffset;
+@@ -398,6 +400,22 @@
+     }
+ 
+     // ========================================
++    // A clear optical rim blends into the scattered-light interior. Both
++    // samples use exactly the same displacement, so detail never jumps at the join.
++    // This is layer-only and disabled unless the preset requests edge_clarity.
++    float rimClarity = edgeClarity * (1.0 - smoothstep(0.0, 1.8 * bezelWidthPx, -bevelSdf));
++    if (rimClarity > 0.001) {
++        vec3 sharp;
++        if (chromaticAberration > 0.001) {
++            sharp.r = texture(clearTex, clamp(toTexUV(toSampleBoxUV(uvR)), 0.001, 0.999)).r;
++            sharp.g = texture(clearTex, clamp(toTexUV(toSampleBoxUV(uvG)), 0.001, 0.999)).g;
++            sharp.b = texture(clearTex, clamp(toTexUV(toSampleBoxUV(uvB)), 0.001, 0.999)).b;
++        } else {
++            sharp = texture(clearTex, clamp(toTexUV(toSampleBoxUV(uvG)), 0.001, 0.999)).rgb;
++        }
++        color = mix(color, sharp, rimClarity);
++    }
++
+     // FROSTED TINT (per-theme tone mapping)
+     // ========================================
+     float blurredLum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+@@ -410,6 +428,8 @@
+     float lumCurve = smoothstep(0.25, 0.55, blurredLum);
+ 
+     // Dim: multiplicative — effective at darkening bright areas
++    // The sharp rim and soft interior share one tone response. A separate
++    // rim transmission boost makes saturated wallpaper look like a colored border.
+     color *= brightness * (1.0 - adaptiveDim * lumCurve);
+ 
+     // Boost: additive lift — multiplicative can't brighten near-black content
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -50,8 +50,11 @@
+         return pair.first == layerSurface.get() || pair.second->getLayerSurface() == layerSurface;
+     });
+ 
+-    if (auto monitor = layerSurface->m_monitor.lock())
++    if (auto monitor = layerSurface->m_monitor.lock()) {
++        // Remaining glass layers must stop sampling the layer that just closed.
++        g_pGlobalState->bumpSceneGeneration(monitor);
+         g_pHyprRenderer->damageMonitor(monitor);
++    }
+ }
+ 
+ static void onMonitorGone(PHLMONITOR monitor) {

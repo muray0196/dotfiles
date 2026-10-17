@@ -1,0 +1,262 @@
+diff --git a/src/GlassLayerSurface.cpp b/src/GlassLayerSurface.cpp
+index ce22a07..51809f9 100644
+--- a/src/GlassLayerSurface.cpp
++++ b/src/GlassLayerSurface.cpp
+@@ -403,7 +403,8 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha, bool
+         // background changes. There is no GPU readback or continuous sampling.
+         const float adaptiveScatter = resolvePresetFloat(ctx, &SPresetValues::adaptiveScatter, &SOverridableConfig::adaptiveScatter, 0.0f);
+         const float adaptiveRim = resolvePresetFloat(ctx, &SPresetValues::adaptiveRim, &SOverridableConfig::adaptiveRim, 0.0f);
+-        if (adaptiveScatter > 0.0f || adaptiveRim > 0.0f) {
++        const float shapedReflection = resolvePresetFloat(ctx, &SPresetValues::shapedReflection, &SOverridableConfig::shapedReflection, 0.0f);
++        if (adaptiveScatter > 0.0f || adaptiveRim > 0.0f || shapedReflection > 0.0f) {
+             Vector2D diffusePadding;
+             GlassRenderer::sampleBackground(m_diffuseFramebuffer, xray ? snapshot : source, sampleBox, diffusePadding, 4);
+             GlassRenderer::blurBackground(m_diffuseFramebuffer, 6.0f, 2, source);
+@@ -604,6 +605,19 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EM
+             break;
+     }
+ 
++    // Blur only the current client surface alpha for local legibility. The
++    // scratch allocation is reused; pixels are refreshed with the rendered
++    // client so text updates never leave stale dark silhouettes. This adds no
++    // timer or damage source. Background colour never enters this mask.
++    if (resolvePresetFloat(ctx, &SPresetValues::localDimming, &SOverridableConfig::localDimming, 0.0f) > 0.0f) {
++        GlassRenderer::sampleBackground(m_foregroundFramebuffer, m_surfaceTempFramebuffer,
++                                        transformBox, maskInfo.foregroundPadding, 2);
++        GlassRenderer::blurBackground(m_foregroundFramebuffer, 6.0f * scale, 1, target);
++        maskInfo.foregroundTextureId = m_foregroundFramebuffer->getTexture()->m_texID;
++    } else {
++        m_foregroundFramebuffer.reset();
++    }
++
+     if (m_clearFramebuffer)
+         maskInfo.clearTextureId = m_clearFramebuffer->getTexture()->m_texID;
+ 
+diff --git a/src/GlassLayerSurface.hpp b/src/GlassLayerSurface.hpp
+index a0138c5..283ce60 100644
+--- a/src/GlassLayerSurface.hpp
++++ b/src/GlassLayerSurface.hpp
+@@ -64,6 +64,7 @@ class CGlassLayerSurface {
+     SP<Render::IFramebuffer> m_clearFramebuffer; // Unblurred, full-resolution lens sample.
+     SP<Render::IFramebuffer> m_diffuseFramebuffer; // Cached quarter-resolution broad scatter.
+     SP<Render::IFramebuffer> m_surfaceTempFramebuffer;
++    SP<Render::IFramebuffer> m_foregroundFramebuffer; // Soft foreground-alpha backing, half resolution.
+     Vector2D     m_samplePaddingRatio;
+     bool         m_hasCachedSample = false;
+     bool         m_backgroundDirty = false;
+diff --git a/src/GlassRenderer.cpp b/src/GlassRenderer.cpp
+index 04cc1a1..ae199dd 100644
+--- a/src/GlassRenderer.cpp
++++ b/src/GlassRenderer.cpp
+@@ -459,15 +459,26 @@ void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFr
+     const bool hasDiffuseSample = mask && mask->diffuseTextureId != 0;
+     glActiveTexture(GL_TEXTURE3);
+     glBindTexture(GL_TEXTURE_2D, hasDiffuseSample ? mask->diffuseTextureId : 0);
++    const bool hasForegroundSample = mask && mask->foregroundTextureId != 0;
++    glActiveTexture(GL_TEXTURE4);
++    glBindTexture(GL_TEXTURE_2D, hasForegroundSample ? mask->foregroundTextureId : 0);
+     glActiveTexture(GL_TEXTURE0);
+ 
+     auto shader = g_pHyprOpenGL->useShader(shaderManager.glassShader);
+     glUniform1i(uniforms.clearTex, 2);
+     glUniform1i(uniforms.diffuseTex, 3);
++    glUniform1i(uniforms.foregroundTex, 4);
++    glUniform2f(uniforms.foregroundPadding,
++        hasForegroundSample ? static_cast<float>(mask->foregroundPadding.x) : 0.0f,
++        hasForegroundSample ? static_cast<float>(mask->foregroundPadding.y) : 0.0f);
+     glUniform1f(uniforms.adaptiveScatter, hasDiffuseSample
+         ? resolvePresetFloat(resolveContext, &SPresetValues::adaptiveScatter, &SOverridableConfig::adaptiveScatter, 0.0f) : 0.0f);
+     glUniform1f(uniforms.adaptiveRim, hasDiffuseSample
+         ? resolvePresetFloat(resolveContext, &SPresetValues::adaptiveRim, &SOverridableConfig::adaptiveRim, 0.0f) : 0.0f);
++    glUniform1f(uniforms.shapedReflection, hasDiffuseSample
++        ? resolvePresetFloat(resolveContext, &SPresetValues::shapedReflection, &SOverridableConfig::shapedReflection, 0.0f) : 0.0f);
++    glUniform1f(uniforms.localDimming, hasForegroundSample
++        ? resolvePresetFloat(resolveContext, &SPresetValues::localDimming, &SOverridableConfig::localDimming, 0.0f) : 0.0f);
+     glUniform1f(uniforms.materialProgress, mask ? std::clamp(mask->materialProgress, 0.0f, 1.0f) : 1.0f);
+     glUniform1f(uniforms.edgeClarity, hasClearSample
+         ? resolvePresetFloat(resolveContext, &SPresetValues::edgeClarity, &SOverridableConfig::edgeClarity, 0.0f) : 0.0f);
+@@ -614,6 +625,8 @@ void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFr
+     g_pHyprOpenGL->scissor(damageExtents.w > 0 && damageExtents.h > 0 ? damageExtents : rawBox);
+     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+     g_pHyprOpenGL->scissor(nullptr);
++    glActiveTexture(GL_TEXTURE4);
++    glBindTexture(GL_TEXTURE_2D, 0);
+     glActiveTexture(GL_TEXTURE3);
+     glBindTexture(GL_TEXTURE_2D, 0);
+     glActiveTexture(GL_TEXTURE2);
+diff --git a/src/GlassRenderer.hpp b/src/GlassRenderer.hpp
+index b16937a..723558d 100644
+--- a/src/GlassRenderer.hpp
++++ b/src/GlassRenderer.hpp
+@@ -63,6 +63,8 @@ static_assert(sizeof(SRegionRect) == 4 * sizeof(float));
+ struct SMaskInfo {
+     GLuint   clearTextureId = 0; // Optional full-resolution background, texture unit 2.
+     GLuint   diffuseTextureId = 0; // Optional broad scatter, texture unit 3.
++    GLuint   foregroundTextureId = 0; // Soft foreground alpha, texture unit 4.
++    Vector2D foregroundPadding;
+     float    materialProgress = 1.0f;
+     GLuint   textureId;
+     GLenum   target;
+diff --git a/src/PluginConfig.cpp b/src/PluginConfig.cpp
+index 35a3694..962321e 100644
+--- a/src/PluginConfig.cpp
++++ b/src/PluginConfig.cpp
+@@ -400,6 +400,8 @@ static bool setPresetFloatField(SPresetValues& values, std::string_view key, std
+     if (key == "surface_curve") { values.surfaceCurve = std::clamp(parsed, 0.0f, 3.0f); return true; }
+     if (key == "adaptive_scatter") { values.adaptiveScatter = std::clamp(parsed, 0.0f, 1.0f); return true; }
+     if (key == "adaptive_rim") { values.adaptiveRim = std::clamp(parsed, 0.0f, 1.0f); return true; }
++    if (key == "local_dimming") { values.localDimming = std::clamp(parsed, 0.0f, 0.8f); return true; }
++    if (key == "shaped_reflection") { values.shapedReflection = std::clamp(parsed, 0.0f, 1.0f); return true; }
+     if (key == "material_motion") { values.materialMotion = std::clamp(parsed, 0.0f, 1.0f); return true; }
+     if (key == "shadow_strength") { values.shadowStrength = std::clamp(parsed, 0.0f, 0.3f); return true; }
+     if (key == "shadow_size") { values.shadowSize = std::clamp(parsed, 0.0f, 20.0f); return true; }
+@@ -470,6 +472,8 @@ static void mergePresetValues(SPresetValues& target, const SPresetValues& overri
+     mergeFloat(target.surfaceCurve, overrides.surfaceCurve);
+     mergeFloat(target.adaptiveScatter, overrides.adaptiveScatter);
+     mergeFloat(target.adaptiveRim, overrides.adaptiveRim);
++    mergeFloat(target.localDimming, overrides.localDimming);
++    mergeFloat(target.shapedReflection, overrides.shapedReflection);
+     mergeFloat(target.materialMotion, overrides.materialMotion);
+     mergeFloat(target.shadowStrength, overrides.shadowStrength);
+     mergeFloat(target.shadowSize, overrides.shadowSize);
+diff --git a/src/PluginConfig.hpp b/src/PluginConfig.hpp
+index 9335e1d..9be2fde 100644
+--- a/src/PluginConfig.hpp
++++ b/src/PluginConfig.hpp
+@@ -238,6 +238,8 @@ struct SOverridableConfig {
+     Hyprlang::FLOAT* const* surfaceCurve        = nullptr; // Layer presets only.
+     Hyprlang::FLOAT* const* adaptiveScatter     = nullptr; // Layer presets only.
+     Hyprlang::FLOAT* const* adaptiveRim         = nullptr; // Layer presets only.
++    Hyprlang::FLOAT* const* localDimming        = nullptr; // Layer presets only.
++    Hyprlang::FLOAT* const* shapedReflection    = nullptr; // Layer presets only.
+     Hyprlang::FLOAT* const* materialMotion      = nullptr; // Layer presets only.
+     Hyprlang::FLOAT* const* shadowStrength      = nullptr; // Layer presets only.
+     Hyprlang::FLOAT* const* shadowSize          = nullptr; // Layer presets only.
+@@ -282,6 +284,8 @@ struct SPresetValues {
+     float   surfaceCurve       = static_cast<float>(SENTINEL_FLOAT);
+     float   adaptiveScatter    = static_cast<float>(SENTINEL_FLOAT);
+     float   adaptiveRim        = static_cast<float>(SENTINEL_FLOAT);
++    float   localDimming       = static_cast<float>(SENTINEL_FLOAT);
++    float   shapedReflection   = static_cast<float>(SENTINEL_FLOAT);
+     float   materialMotion     = static_cast<float>(SENTINEL_FLOAT);
+     float   shadowStrength     = static_cast<float>(SENTINEL_FLOAT);
+     float   shadowSize         = static_cast<float>(SENTINEL_FLOAT);
+diff --git a/src/ShaderManager.cpp b/src/ShaderManager.cpp
+index 58fb52a..d1890de 100644
+--- a/src/ShaderManager.cpp
++++ b/src/ShaderManager.cpp
+@@ -54,6 +54,10 @@ bool CShaderManager::compileGlassShader() {
+     glassUniforms.diffuseTex          = glGetUniformLocation(program, "diffuseTex");
+     glassUniforms.adaptiveScatter     = glGetUniformLocation(program, "adaptiveScatter");
+     glassUniforms.adaptiveRim         = glGetUniformLocation(program, "adaptiveRim");
++    glassUniforms.localDimming        = glGetUniformLocation(program, "localDimming");
++    glassUniforms.foregroundTex       = glGetUniformLocation(program, "foregroundTex");
++    glassUniforms.foregroundPadding   = glGetUniformLocation(program, "foregroundPadding");
++    glassUniforms.shapedReflection    = glGetUniformLocation(program, "shapedReflection");
+     glassUniforms.materialProgress    = glGetUniformLocation(program, "materialProgress");
+     glassUniforms.refractionSpread    = glGetUniformLocation(program, "refractionSpread");
+     glassUniforms.fresnelTint         = glGetUniformLocation(program, "fresnelTint");
+diff --git a/src/ShaderManager.hpp b/src/ShaderManager.hpp
+index f79ee72..6a1bbe5 100644
+--- a/src/ShaderManager.hpp
++++ b/src/ShaderManager.hpp
+@@ -30,6 +30,10 @@ struct SGlassUniforms {
+     GLint diffuseTex = -1;
+     GLint adaptiveScatter = -1;
+     GLint adaptiveRim = -1;
++    GLint localDimming = -1;
++    GLint foregroundTex = -1;
++    GLint foregroundPadding = -1;
++    GLint shapedReflection = -1;
+     GLint materialProgress = -1;
+     GLint fresnelTint = -1;
+     GLint bevelStrength = -1;
+diff --git a/src/Shaders.hpp b/src/Shaders.hpp
+index d1b4a23..352156c 100644
+--- a/src/Shaders.hpp
++++ b/src/Shaders.hpp
+@@ -78,6 +78,10 @@ uniform float surfaceCurve;
+ uniform sampler2D diffuseTex;
+ uniform float adaptiveScatter;
+ uniform float adaptiveRim;
++uniform float localDimming;
++uniform sampler2D foregroundTex;
++uniform vec2 foregroundPadding;
++uniform float shapedReflection;
+ uniform float materialProgress;
+ uniform sampler2D maskTex;
+ uniform int useMask;
+@@ -492,6 +496,15 @@ void main() {
+     color *= brightness * (1.0 - adaptiveDim * lumCurve);
+     color *= 1.0 - 0.12 * adaptation; // Gentle neutral backing under busy detail.
+ 
++    // Gaussian-softened foreground alpha gives a continuous local backing,
++    // rather than shifted copies of glyphs. Ignore the panel's faint base fill.
++    if (localDimming > 0.001 && hasMask) {
++        vec2 foregroundUV = uv * (1.0 - 2.0 * foregroundPadding) + foregroundPadding;
++        float coverage = texture(foregroundTex, clamp(foregroundUV, 0.001, 0.999)).a;
++        float backing = smoothstep(0.065, 0.23, coverage);
++        color *= 1.0 - localDimming * backing * smoothstep(0.12, 0.7, blurredLum);
++    }
++
+     // Boost: additive lift — multiplicative can't brighten near-black content
+     color += vec3(adaptiveBoost * (1.0 - lumCurve) * 0.5);
+ 
+@@ -521,6 +534,22 @@ void main() {
+         color += (pixelHash(floor(uv * fullSize)) - 0.5) * noiseStrength * 0.1;
+ 
+     // ========================================
++    // Environment reflection keeps the local background hue. Unlike the old
++    // near-white rim, dark saturated colours are not lifted to white or
++    // normalized to full intensity. Bright light is a separate, shaped lobe.
++    vec3 reflectedEnvironment = vec3(1.0);
++    float reflectionLobe = 0.0;
++    if (shapedReflection > 0.001 && capDepth < 1.0) {
++        vec2 environmentUV = uv + capOutward * (8.0 * monitorScale) * invFullSize;
++        vec3 environment = clamp(texture(diffuseTex,
++            clamp(toTexUV(toSampleBoxUV(environmentUV)), 0.001, 0.999)).rgb, 0.0, 1.0);
++        float environmentLum = dot(environment, vec3(0.2126, 0.7152, 0.0722));
++        reflectedEnvironment = mix(vec3(environmentLum), environment, 0.92);
++        float alignment = dot(capOutward, lightDir(bevelAngle));
++        reflectionLobe = pow(max(alignment, 0.0), 10.0)
++            + 0.28 * pow(max(-alignment, 0.0), 14.0);
++    }
++
+     // BEVEL — thin lit line hugging the edge, brightest on the side facing the light
+     // ========================================
+     if (bevelStrength > 0.001) {
+@@ -563,8 +592,11 @@ void main() {
+                 * (0.35 + 0.65 * (1.0 - facing)) * materialProgress;
+         }
+ 
++        bevelLight = mix(bevelLight, reflectedEnvironment, shapedReflection);
++
+         // the fresnel tint below reads the bevelled colour, so bevel the copy too
+         float bevelLit = ring * facing * bevelStrength * materialProgress * rimGain;
++        bevelLit = mix(bevelLit, ring * (0.24 + 0.2 * facing) * bevelStrength * materialProgress, shapedReflection);
+         float bevelDark = bevelShadow > 0.001 ? ring * (1.0 - facing) * bevelShadow : 0.0;
+         color = mix(mix(color, bevelLight, bevelLit), vec3(0.0), bevelDark);
+         tintSource = mix(mix(tintSource, bevelLight, bevelLit), vec3(0.0), bevelDark);
+@@ -590,10 +622,22 @@ void main() {
+             float maxC = max(max(tintSource.r, tintSource.g), tintSource.b);
+             fresnelLight = mix(fresnelLight, maxC > 0.001 ? tintSource / maxC : vec3(1.0), fresnelTint);
+         }
++        fresnelLight = mix(fresnelLight, reflectedEnvironment, shapedReflection);
+         color += fresnelLight * fresnel * materialProgress;
+     }
+ 
+     // ========================================
++    // Fixed shaped reflections: a narrow bright core and a soft shoulder, tied
++    // to the same curved normal as refraction. No clock, pointer, or moving light.
++    if (shapedReflection > 0.001) {
++        float depth = -cornerSdf / max(monitorScale, 0.001);
++        float core = exp(-pow((depth - 0.85) / 0.65, 2.0));
++        float shoulder = exp(-pow((depth - 1.5) / 2.1, 2.0));
++        float glint = (0.75 * core + 0.10 * shoulder) * reflectionLobe
++            * shapedReflection * materialProgress;
++        color = mix(color, vec3(1.0), clamp(glint, 0.0, 1.0));
++    }
++
+     // SPECULAR — subtle top highlight (edge zone)
+     // ========================================
+     if (specularStrength > 0.001) {

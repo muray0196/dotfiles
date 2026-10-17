@@ -24,11 +24,12 @@ Item {
         visible: sectionHeader.healthMarkerVisible
         width: 5
         height: 5
-        radius: 0
+        radius: height / 2
         color: sectionHeader.healthTone
     }
 
-    Text {
+    GlassText {
+        palette: sectionHeader.palette
         anchors {
             left: parent.left
             leftMargin: sectionHeader.healthMarkerVisible ? 9 : 0
@@ -36,12 +37,13 @@ Item {
         }
         text: sectionHeader.label
         color: sectionHeader.palette.textPrimary
-        font.family: "Adwaita Mono"
-        font.pixelSize: 14
-        font.weight: Font.Medium
+        font.family: sectionHeader.palette.labelFont
+        font.pixelSize: 12
+        font.weight: Font.DemiBold
     }
 
-    Text {
+    GlassText {
+        palette: sectionHeader.palette
         anchors {
             right: parent.right
             verticalCenter: parent.verticalCenter
@@ -50,7 +52,7 @@ Item {
             && !sectionHeader.statusActive
         text: sectionHeader.metadata
         color: sectionHeader.metadataTone
-        font.family: "Adwaita Mono"
+        font.family: sectionHeader.palette.labelFont
         font.pixelSize: sectionHeader.palette.observationMetadataSize
         font.weight: Font.Medium
     }
@@ -69,14 +71,15 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: 8
                 height: 8
-                radius: 0
+                radius: height / 2
                 color: sectionHeader.statusTone
             }
 
-            Text {
+            GlassText {
+                palette: sectionHeader.palette
                 text: sectionHeader.statusLabel
                 color: sectionHeader.statusTone
-                font.family: "Adwaita Mono"
+                font.family: sectionHeader.palette.labelFont
                 font.pixelSize: 11
                 font.weight: Font.Medium
             }
