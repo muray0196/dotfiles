@@ -37,16 +37,17 @@ CONTINUOUS_OPTICS_PLUGIN = DEFAULT_PLUGIN.with_name("hyprglass-0.10.0-optics18-0
 WIDE_OPTICS_PLUGIN = DEFAULT_PLUGIN.with_name("hyprglass-0.10.0-optics19-0.56.2.so")
 SHOULDER_OPTICS_PLUGIN = DEFAULT_PLUGIN.with_name("hyprglass-0.10.0-optics20-0.56.2.so")
 RETURN_BAND_OPTICS_PLUGIN = DEFAULT_PLUGIN.with_name("hyprglass-0.10.0-optics21-0.56.2.so")
-OPTICS_PLUGIN = DEFAULT_PLUGIN.with_name("hyprglass-0.10.0-optics22-0.56.2.so")
-OPTICS_VERSION = "0.10.0-optics22"
+TRANSPORT_OPTICS_PLUGIN = DEFAULT_PLUGIN.with_name("hyprglass-0.10.0-optics22-0.56.2.so")
+OPTICS_PLUGIN = DEFAULT_PLUGIN.with_name("hyprglass-0.10.0-optics23-0.56.2.so")
+OPTICS_VERSION = "0.10.0-optics23"
 CURVED_STYLES = ("clear", "blurred", "rounded", "soft", "sculpted")
 STYLES = ("off", "smoky", "legacy-clear", "frosted", "liquid", *CURVED_STYLES)
 
 
 def check_material_version(style, version):
     if style in CURVED_STYLES and version != OPTICS_VERSION:
-        raise RuntimeError("Adaptive curved materials require the optics22 build. Unload the older plugin first.")
-    if style == "liquid" and version not in ("0.10.0-optics1", "0.10.0-optics2", "0.10.0-optics3", "0.10.0-optics4", "0.10.0-optics5", "0.10.0-optics6", "0.10.0-optics7", "0.10.0-optics8", "0.10.0-optics9", "0.10.0-optics10", "0.10.0-optics11", "0.10.0-optics12", "0.10.0-optics13", "0.10.0-optics14", "0.10.0-optics15", "0.10.0-optics16", "0.10.0-optics17", "0.10.0-optics18", "0.10.0-optics19", "0.10.0-optics20", "0.10.0-optics21", OPTICS_VERSION):
+        raise RuntimeError("Adaptive curved materials require the optics23 build. Unload the older plugin first.")
+    if style == "liquid" and version not in ("0.10.0-optics1", "0.10.0-optics2", "0.10.0-optics3", "0.10.0-optics4", "0.10.0-optics5", "0.10.0-optics6", "0.10.0-optics7", "0.10.0-optics8", "0.10.0-optics9", "0.10.0-optics10", "0.10.0-optics11", "0.10.0-optics12", "0.10.0-optics13", "0.10.0-optics14", "0.10.0-optics15", "0.10.0-optics16", "0.10.0-optics17", "0.10.0-optics18", "0.10.0-optics19", "0.10.0-optics20", "0.10.0-optics21", "0.10.0-optics22", OPTICS_VERSION):
         raise RuntimeError("Liquid requires an optics build. Unload the stock HyprGlass plugin first.")
 
 
@@ -194,7 +195,7 @@ def main():
                 "Clear preserves the accepted rounded appearance; Blurred softens its background. "
                 "No argument (or choose) opens the optional wofi picker. "
                 "rounded is an alias for clear; legacy-clear is the earlier square fallback. "
-                "Applying a material reloads Hyprland configuration; adaptive curved materials require optics22. "
+                "Applying a material reloads Hyprland configuration; adaptive curved materials require optics23. "
                 "Successful selections are remembered across reboots. Use restore from desktop startup; "
                 "it waits for both widgets. Does not install software or enable startup itself."),
     )
@@ -215,7 +216,7 @@ def main():
             print("No saved glass material; desktop left unchanged.")
             return
     if args.plugin is None:
-        args.plugin = next((path for path in (OPTICS_PLUGIN, RETURN_BAND_OPTICS_PLUGIN, SHOULDER_OPTICS_PLUGIN, WIDE_OPTICS_PLUGIN, CONTINUOUS_OPTICS_PLUGIN, CORNER_OPTICS_PLUGIN, FIXED_LIGHT_OPTICS_PLUGIN, CLEAR_ROLL_OPTICS_PLUGIN, SOFT_JOIN_OPTICS_PLUGIN, ROLLED_OPTICS_PLUGIN, MENISCUS_OPTICS_PLUGIN, COHERENT_OPTICS_PLUGIN, RETURN_OPTICS_PLUGIN, VOLUME_OPTICS_PLUGIN, CONTOUR_OPTICS_PLUGIN, BALANCED_OPTICS_PLUGIN, LENS_OPTICS_PLUGIN, LIGHT_OPTICS_PLUGIN, RIM_OPTICS_PLUGIN, MOTION_OPTICS_PLUGIN, CURVED_OPTICS_PLUGIN, LEGACY_OPTICS_PLUGIN, DEFAULT_PLUGIN)
+        args.plugin = next((path for path in (OPTICS_PLUGIN, TRANSPORT_OPTICS_PLUGIN, RETURN_BAND_OPTICS_PLUGIN, SHOULDER_OPTICS_PLUGIN, WIDE_OPTICS_PLUGIN, CONTINUOUS_OPTICS_PLUGIN, CORNER_OPTICS_PLUGIN, FIXED_LIGHT_OPTICS_PLUGIN, CLEAR_ROLL_OPTICS_PLUGIN, SOFT_JOIN_OPTICS_PLUGIN, ROLLED_OPTICS_PLUGIN, MENISCUS_OPTICS_PLUGIN, COHERENT_OPTICS_PLUGIN, RETURN_OPTICS_PLUGIN, VOLUME_OPTICS_PLUGIN, CONTOUR_OPTICS_PLUGIN, BALANCED_OPTICS_PLUGIN, LENS_OPTICS_PLUGIN, LIGHT_OPTICS_PLUGIN, RIM_OPTICS_PLUGIN, MOTION_OPTICS_PLUGIN, CURVED_OPTICS_PLUGIN, LEGACY_OPTICS_PLUGIN, DEFAULT_PLUGIN)
                             if path.is_file()), OPTICS_PLUGIN)
     hypr = compositor(args.instance)
 

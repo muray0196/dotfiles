@@ -6,7 +6,7 @@ preserving its geometry, refraction, highlights, tint, and foreground treatment.
 These are local modes, not Apple's Regular/Clear material variants.
 
 Clear is the baseline for optical refinement; interaction-driven movement is
-outside the scope of these passive desktop widgets. The optics22 build keeps
+outside the scope of these passive desktop widgets. The optics23 build keeps
 the same panel sizes, spacing, content, and dividers:
 
 | Treatment | Appearance | Corner radius |
@@ -26,17 +26,16 @@ less background dimming. The broad specular sheen is disabled. The rim reflects
 softened nearby colour, with separate fixed neutral highlights at the silhouette.
 Their width follows the surface normal and their position follows the light
 direction. A broader, faint shoulder fades continuously into the face,
-without a separate inner border. The optical model traces transmission through curved front
-and back surfaces. Its shallower back cap and closer background plane restrain
-excessive focusing at the outer corners. The roll still compresses and locally
-reverses background detail before joining the flat centre smoothly. The front uses a fifth-order radial cap; the tapered rear retains power 9/4. The
-highlights account for the pixel's surface-angle footprint, and reflected
-colour receives the same tone response as transmission without a separate white
-lift. Compressed
-fine detail receives bounded footprint filtering at the clear rim. A bounded internal-reflection
-approximation returns colour from the next surface hit, so the outer lip can
-differ from the adjacent transmitted band. Local dimming follows the rendered
-text and separators, leaving empty regions clearer.
+without a separate inner border. One continuous curved cap now supplies both
+lensing and lighting. A refracted ray projects onto a finite virtual image plane,
+so background detail can fold through the rounded shoulder without blending in
+a separate coloured return strip. The shoulder follows the full corner radius;
+optical depth flattens gradually on larger controls. Its 9/4-power profile joins
+the flat centre with zero slope and curvature. This is an equivalent screen-space
+lens, not a complete physical front/back-interface simulation. Highlights account
+for the pixel's surface-angle footprint, and compressed fine detail receives
+bounded footprint filtering. Local dimming follows the rendered text and
+separators, leaving empty regions clearer.
 `blurred` changes only `blur_strength` from 0.32 to 1.15 and `blur_iterations`
 from 1 to 2. The sharp rim mix, local dimming, adaptive scattering, and colour
 parameters are inherited unchanged. `soft` remains an older experiment with
@@ -658,6 +657,54 @@ The reference launcher and unloaded-renderer Clear restoration were checked;
 saved choice, visibility, and the physical display setup were preserved. The
 11 mode tests and repository smoke suite passed. An actual reboot was not run.
 
+## Continuous equivalent lens
+
+[The equivalent-lens patch](../scripts/patches/hyprglass-0.10.0-equivalent-lens.patch)
+applies twenty-third. Optics22 is retained as the pushed checkpoint. Increasing
+its rear-surface curvature or thickness still produced a distinct coloured strip;
+the current model replaces that transport path instead of widening the strip.
+
+One 9/4-power cap supplies the normal for Snell refraction, local front reflection,
+and fixed lights. The refracted ray reaches a virtual image plane below the cap.
+Its continuous sampling field can reverse across the shoulder: a background
+colour boundary becomes a broad folded region, a thin edge, or disappears,
+depending on where it intersects the lens. There is no angular rim-width mask,
+separate return-image blend, or iterative rear-surface intersection. The full
+corner radius sets the curved shoulder; a smooth fourth-power depth bound keeps
+larger controls from growing indefinitely into deep lenses. Flat panel centres,
+foreground content, colour settings, blur, geometry, and spacing are retained.
+
+This is a deliberate screen-space equivalent lens. Its image-plane distance is
+a chosen material parameter, not a measurement of Apple's renderer or a physical
+back-surface position. It does not simulate multiple interfaces, internal bounces,
+or unseen environment light. Apple describes Liquid Glass as a digital material
+whose identity comes from lensing in [Meet Liquid Glass](https://developer.apple.com/videos/play/wwdc2025/219/);
+their precise sampling field remains unpublished. The reconstructed flower
+background also differs from the source video, so matching its pixels is not
+an exact parity test.
+
+Independent numerical checks cover 24,192 positions across five panel heights,
+two circle sizes, four scales, and all directions. Analytic normals agree with
+finite height differences within 0.000000568; mirrored and rotated fields agree,
+and scale error stays below 0.000010 logical pixels at the grazing silhouette.
+Clear's tested samples remain inside the shape; maximum displacement is below
+two corner radii. Zero refraction returns the original coordinate.
+
+Native comparisons cover the three reference circles, four shifted photographic
+or grid backgrounds, and nine panel scenes. Every tested flat panel centre is
+pixel-identical to optics22. Fine high-contrast patterns can still form thin arcs
+at grazing angles; an additional blur experiment was not retained because its
+visual benefit was small. Both clean builds match all 50 source/build inputs
+reconstructed from the pinned upstream and the patch sequence. The reference
+launcher and unloaded-renderer Clear restoration pass, preserving saved mode,
+widget visibility, and display layout. The 11 mode tests and repository smoke
+suite pass. An actual reboot was not performed.
+
+The rewrite removes 97 shader lines, including 28 iterative intersection steps
+and the separate return-colour fetch. It adds no texture, pass, dependency, or
+continuous timer. This is a simpler optical approximation; a GPU timing gain
+has not been measured.
+
 ## Build explicitly
 
 Use the matching Hyprland headers and the build dependencies documented by
@@ -669,9 +716,9 @@ exit, and the stock binary is retained:
 (
   set -eu
   glass_repo="$PWD"
-  glass_variant="${GLASS_VARIANT:-optics22}"
+  glass_variant="${GLASS_VARIANT:-optics23}"
   case "$glass_variant" in
-    optics22|optics22-reference) ;;
+    optics23|optics23-reference) ;;
     *) echo "Unknown glass build variant: $glass_variant" >&2; exit 1 ;;
   esac
   glass_build=$(mktemp -d)
@@ -718,7 +765,8 @@ exit, and the stock binary is retained:
   git apply "$glass_repo/scripts/patches/hyprglass-0.10.0-rolled-shoulder.patch"
   git apply "$glass_repo/scripts/patches/hyprglass-0.10.0-return-band.patch"
   git apply "$glass_repo/scripts/patches/hyprglass-0.10.0-surface-transport.patch"
-  if [ "$glass_variant" = optics22-reference ]; then
+  git apply "$glass_repo/scripts/patches/hyprglass-0.10.0-equivalent-lens.patch"
+  if [ "$glass_variant" = optics23-reference ]; then
     git apply "$glass_repo/scripts/patches/hyprglass-0.10.0-reference-radius.patch"
   fi
   make -j2 HYPRGLASS_VERSION="0.10.0-$glass_variant"
@@ -746,18 +794,18 @@ widgets' 44 px corners. At native size the stage is 1531 × 611, with 304 / 434 
 the entire scene down. The actual glass is rendered by HyprGlass, not baked into
 an image or drawn by a browser filter.
 
-The scene needs a separate `optics22-reference` build. It applies the same
-twenty-two optical patches, followed by
+The scene needs a separate `optics23-reference` build. It applies the same
+twenty-three optical patches, followed by
 [reference-radius](../scripts/patches/hyprglass-0.10.0-reference-radius.patch),
 which only raises the preset radius ceiling from 48 to 1024 logical pixels.
 The renderer still clamps each radius to half its surface size. No shader,
 refraction, blur, or lighting formula changes. To build it, set
-`export GLASS_VARIANT=optics22-reference`, run the build recipe above, then
-`unset GLASS_VARIANT`. Keep the ordinary optics22 binary too: the launcher
+`export GLASS_VARIANT=optics23-reference`, run the build recipe above, then
+`unset GLASS_VARIANT`. Keep the ordinary optics23 binary too: the launcher
 temporarily switches to the reference build and restores the ordinary build on
 Close, Escape, `--stop`, terminal interruption, or scene-process exit.
 
-The launcher requires an already active optics22 desktop renderer. It does not
+The launcher requires an already active optics23 desktop renderer. It does not
 save a different material, replace the wallpaper, modify panel geometry, or
 install an autostart/service. An exclusive runtime lock prevents two launchers
 from swapping the same plugin.
@@ -824,7 +872,7 @@ Selecting a material reloads Hyprland's configuration because custom presets
 become active in the plugin's configuration-reloaded callback. The helper
 checks the resulting preset, configuration errors, widget acknowledgements,
 and shader readiness. `liquid` refuses the stock build rather than silently
-falling back to a blurred approximation. Adaptive curved styles require optics22.
+falling back to a blurred approximation. Adaptive curved styles require optics23.
 Each successful selection, including `off`, is saved in the user's persistent
 state directory. The runtime selection remains separate so a failed renderer
 can fall back to ordinary widgets without erasing the last successful choice.

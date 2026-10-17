@@ -15,7 +15,7 @@ import time
 
 ROOT = Path(__file__).resolve().parent.parent
 SCENE = ROOT / "scripts/quickshell-glass-reference/shell.qml"
-VERSION = "0.10.0-optics22"
+VERSION = "0.10.0-optics23"
 REFERENCE_VERSION = VERSION + "-reference"
 LIBRARY = Path.home() / ".local/lib/quickshell-glass"
 

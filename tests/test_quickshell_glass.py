@@ -181,8 +181,8 @@ class RestoreTests(unittest.TestCase):
 
     def test_modern_modes_reject_older_optics(self):
         for style in ("clear", "blurred"):
-            with self.subTest(style=style), self.assertRaisesRegex(RuntimeError, "optics22"):
-                glass.check_material_version(style, "0.10.0-optics21")
+            with self.subTest(style=style), self.assertRaisesRegex(RuntimeError, "optics23"):
+                glass.check_material_version(style, "0.10.0-optics22")
 
 
 if __name__ == "__main__":

@@ -153,7 +153,7 @@ The optional HyprGlass material has two everyday modes: **Clear** preserves the
 accepted transparent appearance, and **Blurred** softens the background more.
 Both use the same 44 px corners, refraction, highlights, colours, and local text
 contrast. Clear is the baseline for optical refinement. They require the
-[local optics22 build](docs/quickshell-glass.md).
+[local optics23 build](docs/quickshell-glass.md).
 Run the helper without arguments to choose a mode in the optional `wofi` picker;
 Escape cancels without changing anything. Direct mode commands also work without
 `wofi`. Both columns change together, and successful choices survive login.
@@ -209,9 +209,9 @@ its path) and `glass.lua` sourced from the local Hyprland Lua configuration.
 For a deployed module, add `dofile(os.getenv("HOME") ..
 "/.config/quickshell/glass.lua")`; a repository checkout can be referenced
 directly instead. The helper prefers
-`~/.local/lib/quickshell-glass/hyprglass-0.10.0-optics22-0.56.2.so` when present,
+`~/.local/lib/quickshell-glass/hyprglass-0.10.0-optics23-0.56.2.so` when present,
 then earlier optics builds in descending version order, and `hyprglass-0.10.0-0.56.2.so` in the same directory.
-Adaptive curved treatments require optics22; `liquid` accepts all twenty-two optics builds. Applying a material
+Adaptive curved treatments require optics23; `liquid` accepts all twenty-three optics builds. Applying a material
 reloads the Hyprland configuration to activate its preset definitions.
 Standard profiles do not install or activate the plugin. Glass affects only
 the two widget columns. Each successful selection is saved privately in

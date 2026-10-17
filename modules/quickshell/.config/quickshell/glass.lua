@@ -93,8 +93,8 @@ if hl.plugin.hyprglass then
     dark = { brightness = 0.78, contrast = 0.95, saturation = 0.95, adaptive_dim = 0.45 },
   })
 
-  -- Optics13: a smooth solid with curved front/back surfaces. Radius must
-  -- match Theme.qml; the optical roll has the same width on all panels.
+  -- Optics23: one continuous curved lens. Radius must match Theme.qml;
+  -- the background itself folds through the rounded shoulder.
   hg.preset("widgets-clear", {
     inherits = "widgets-liquid",
     layer_radius = 44.0,
@@ -113,7 +113,7 @@ if hl.plugin.hyprglass then
     shadow_strength = 0.06,
     shadow_size = 8.0,
     edge_clarity = 0.88,
-    -- Sets the solid's depth; both surfaces participate in transmission.
+    -- Sets the curved cap and virtual image-plane depth.
     refraction_strength = 1.85,
     -- Keep the narrow edge reflection, without a broad glossy surface highlight.
     fresnel_strength = 0.42,
