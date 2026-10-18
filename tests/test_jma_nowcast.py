@@ -248,7 +248,7 @@ class MainFetchTests(unittest.TestCase):
         },
     ]
 
-    def run_main(self, nearby: bool) -> tuple[dict[str, object], list[str]]:
+    def run_main(self, nearby: bool, *args: str) -> tuple[dict[str, object], list[str]]:
         requested_urls = []
 
         def download(url: str, _timeout: float) -> list[dict[str, object]]:
@@ -261,7 +261,7 @@ class MainFetchTests(unittest.TestCase):
 
         output = io.StringIO()
         with (
-            mock.patch.object(sys, "argv", ["jma_nowcast.py"]),
+            mock.patch.object(sys, "argv", ["jma_nowcast.py", *args]),
             mock.patch.object(
                 jma_nowcast,
                 "load_clock_config",
@@ -323,6 +323,34 @@ class MainFetchTests(unittest.TestCase):
             [frame["offset_minutes"] for frame in radar["frames"]],
             [0],
         )
+
+    def test_custom_viewport_covers_edges_without_changing_map_scale(self) -> None:
+        for nearby in (False, True):
+            for fraction in (0.01, 0.5, 0.99):
+                with self.subTest(nearby=nearby, fraction=fraction), mock.patch.object(
+                    jma_nowcast, "web_mercator_position",
+                    return_value=(500 + fraction, 400 + fraction),
+                ):
+                    default, _ = self.run_main(nearby)
+                    radar, _ = self.run_main(
+                        nearby, "--viewport-width", "344", "--viewport-height", "252"
+                    )
+                    self.assertEqual(radar["meters_per_pixel"], default["meters_per_pixel"])
+                    scale = radar["radar_scale"]
+                    cx, cy = radar["radar_center_pixel_x"], radar["radar_center_pixel_y"]
+                    for frame in radar["frames"]:
+                        tiles = {(t["column"], t["row"]) for t in frame["radar_tiles"]}
+                        for x in (-172, 0, 172 - 0.001):
+                            for y in (-126, 0, 126 - 0.001):
+                                tile = (int((cx + x / scale) // 256), int((cy + y / scale) // 256))
+                                self.assertIn(tile, tiles)
+
+    def test_nonpositive_viewport_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "viewport dimensions"):
+            jma_nowcast.parse_manifests(
+                self.observation_manifest, None, include_animation_frames=False,
+                latitude=35.0, longitude=139.0, viewport_width=0,
+            )
 
 
 if __name__ == "__main__":

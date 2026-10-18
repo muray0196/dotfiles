@@ -20,6 +20,7 @@ HWMON_ROOT = Path("/sys/class/hwmon")
 DRM_ROOT = Path("/sys/class/drm")
 RAPL_ROOT = Path("/sys/class/powercap/intel-rapl:0")
 PCI_IDS = Path("/usr/share/hwdata/pci.ids")
+AMDGPU_IDS = Path("/usr/share/libdrm/amdgpu.ids")
 PROC_NET_ROUTE = Path("/proc/net/route")
 PROC_NET_DEV = Path("/proc/net/dev")
 PROC_UPTIME = Path("/proc/uptime")
@@ -127,6 +128,25 @@ def read_cpu_model() -> str | None:
     return None
 
 
+def read_amdgpu_model(device_id: str, revision: str | None) -> str | None:
+    """Use libdrm's revision-specific marketing name when available."""
+    try:
+        wanted = (int(device_id, 16), int(revision or "", 16))
+    except ValueError:
+        return None
+    for line in (read_text(AMDGPU_IDS) or "").splitlines():
+        fields = line.split(",", 2)
+        if len(fields) != 3:
+            continue
+        try:
+            identity = (int(fields[0], 16), int(fields[1], 16))
+        except ValueError:
+            continue
+        if identity == wanted and fields[2].strip():
+            return fields[2].strip()
+    return None
+
+
 def read_pci_model(device: Path | None) -> str | None:
     if device is None:
         return None
@@ -136,6 +156,10 @@ def read_pci_model(device: Path | None) -> str | None:
         return None
     wanted_vendor = vendor_id.removeprefix("0x").casefold()
     wanted_device = device_id.removeprefix("0x").casefold()
+    if wanted_vendor == "1002":
+        model = read_amdgpu_model(device_id, read_text(device / "revision"))
+        if model:
+            return model
 
     in_vendor = False
     try:

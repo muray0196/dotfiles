@@ -3,6 +3,26 @@
 Linux dotfiles shared across Ubuntu, Arch Linux, and WSL.
 Choose a profile to build anything from a minimal shell setup to a full development environment.
 
+The independent [Liquid Glass optical prototype](scripts/liquid-glass-lab/README.md)
+can be launched with `python3 scripts/liquid-glass-lab/lab.py run`. It opens a
+separate Quickshell test scene and does not change installed desktop widgets.
+It uses the Clear material throughout, with controls for its individual optical effects.
+The same project includes an experimental GPU desktop backend. Use
+`python3 scripts/liquid-glass-lab/lab.py desktop-check` to test it in isolated
+compositors and `desktop-record` to export a preview. See its README before
+using the optional `desktop` command in a normal session.
+
+The separate [widget UI study](scripts/quickshell-widget-preview/README.md)
+redesigns the left/right composition using that accepted material. Run
+`python3 scripts/quickshell-widget-preview/preview.py run` for an isolated window;
+its Clear-only directions and screenshots are documented with the preview.
+The selected preview and desktop share their panel layout and positioning.
+`python3 scripts/quickshell-widget-preview/desktop.py check` validates the actual
+two-panel desktop integration in disposable compositors. The separate desktop
+launcher requires current integration validation and explicit opt-in to load
+the backend. Foreground-only edits reuse that validation; each start checks QML
+syntax before launching the widgets.
+
 ## Supported environments
 
 - Ubuntu
@@ -153,7 +173,10 @@ The optional HyprGlass material has two everyday modes: **Clear** preserves the
 accepted transparent appearance, and **Blurred** softens the background more.
 Both use the same 44 px corners, refraction, highlights, colours, and local text
 contrast. Clear is the baseline for optical refinement. They require the
-[local optics23 build](docs/quickshell-glass.md).
+[local optics24 build](docs/quickshell-glass.md).
+A separate [Clear rework prototype](docs/quickshell-clear-rework.md) starts from
+an independent shader and capture adapter. Its build does not activate it or
+change these defaults.
 Run the helper without arguments to choose a mode in the optional `wofi` picker;
 Escape cancels without changing anything. Direct mode commands also work without
 `wofi`. Both columns change together, and successful choices survive login.
@@ -209,9 +232,9 @@ its path) and `glass.lua` sourced from the local Hyprland Lua configuration.
 For a deployed module, add `dofile(os.getenv("HOME") ..
 "/.config/quickshell/glass.lua")`; a repository checkout can be referenced
 directly instead. The helper prefers
-`~/.local/lib/quickshell-glass/hyprglass-0.10.0-optics23-0.56.2.so` when present,
+`~/.local/lib/quickshell-glass/hyprglass-0.10.0-optics24-0.56.2.so` when present,
 then earlier optics builds in descending version order, and `hyprglass-0.10.0-0.56.2.so` in the same directory.
-Adaptive curved treatments require optics23; `liquid` accepts all twenty-three optics builds. Applying a material
+Adaptive curved treatments require optics24; `liquid` accepts all twenty-four optics builds. Applying a material
 reloads the Hyprland configuration to activate its preset definitions.
 Standard profiles do not install or activate the plugin. Glass affects only
 the two widget columns. Each successful selection is saved privately in

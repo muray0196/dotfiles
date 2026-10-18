@@ -29,6 +29,7 @@ HOURLY_WEATHER = {
     300: "rain",
     400: "snow",
     430: "sleet",
+    500: "sunny",  # Weathernews serves the same sun icon as code 100.
     550: "extreme_heat",
     600: "sunny",
     650: "light_rain",

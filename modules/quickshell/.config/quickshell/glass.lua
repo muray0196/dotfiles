@@ -93,8 +93,8 @@ if hl.plugin.hyprglass then
     dark = { brightness = 0.78, contrast = 0.95, saturation = 0.95, adaptive_dim = 0.45 },
   })
 
-  -- Optics23: one continuous curved lens. Radius must match Theme.qml;
-  -- the background itself folds through the rounded shoulder.
+  -- Optics24: compact refraction with independent curved lighting.
+  -- Radius must match Theme.qml; background folds resolve near the shoulder.
   hg.preset("widgets-clear", {
     inherits = "widgets-liquid",
     layer_radius = 44.0,
@@ -113,7 +113,7 @@ if hl.plugin.hyprglass then
     shadow_strength = 0.06,
     shadow_size = 8.0,
     edge_clarity = 0.88,
-    -- Sets the curved cap and virtual image-plane depth.
+    -- Sets displacement strength and the lighting cap's height.
     refraction_strength = 1.85,
     -- Keep the narrow edge reflection, without a broad glossy surface highlight.
     fresnel_strength = 0.42,

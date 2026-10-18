@@ -6,8 +6,12 @@ preserving its geometry, refraction, highlights, tint, and foreground treatment.
 These are local modes, not Apple's Regular/Clear material variants.
 
 Clear is the baseline for optical refinement; interaction-driven movement is
-outside the scope of these passive desktop widgets. The optics23 build keeps
+outside the scope of these passive desktop widgets. The optics24 build keeps
 the same panel sizes, spacing, content, and dividers:
+
+A separate [Clear rework](quickshell-clear-rework.md) now tests an independent
+optical renderer directly on upstream HyprGlass. It does not change the accepted
+desktop default or depend on this historical optical patch chain.
 
 | Treatment | Appearance | Corner radius |
 | --- | --- | --- |
@@ -26,13 +30,13 @@ less background dimming. The broad specular sheen is disabled. The rim reflects
 softened nearby colour, with separate fixed neutral highlights at the silhouette.
 Their width follows the surface normal and their position follows the light
 direction. A broader, faint shoulder fades continuously into the face,
-without a separate inner border. One continuous curved cap now supplies both
-lensing and lighting. A refracted ray projects onto a finite virtual image plane,
-so background detail can fold through the rounded shoulder without blending in
-a separate coloured return strip. The shoulder follows the full corner radius;
-optical depth flattens gradually on larger controls. Its 9/4-power profile joins
-the flat centre with zero slope and curvature. This is an equivalent screen-space
-lens, not a complete physical front/back-interface simulation. Highlights account
+without a separate inner border. Refraction uses a compact sampling profile
+whose support is half the corner radius, independently of the lighting cap.
+Background detail can fold through the rounded shoulder without blending in a
+separate coloured return strip. Optical excursion flattens gradually on larger
+controls. The lighting cap's 9/4-power profile joins the flat centre with zero
+slope and curvature. This is an equivalent screen-space lens, not a complete
+physical front/back-interface simulation. Highlights account
 for the pixel's surface-angle footprint, and compressed fine detail receives
 bounded footprint filtering. Local dimming follows the rendered text and
 separators, leaving empty regions clearer.
@@ -705,6 +709,47 @@ and the separate return-colour fetch. It adds no texture, pass, dependency, or
 continuous timer. This is a simpler optical approximation; a GPU timing gain
 has not been measured.
 
+## Measured background profile
+
+[The compact-profile patch](../scripts/patches/hyprglass-0.10.0-compact-profile.patch)
+applies twenty-fourth. Optics23's virtual image plane bent too much of the
+interior in the straight-boundary sequence at 2:33–2:36 of
+[Apple's WWDC video](https://developer.apple.com/videos/play/wwdc2025/219/).
+The replacement uses one continuous circular-arc displacement profile,
+`1 - sqrt(t * (2 - t))`, over half the corner radius. It reaches zero with
+zero slope at its inner join. The existing size bound limits displacement;
+reflection and fixed lighting retain their previous rounded surface normal.
+This separates the background mapping from the lighting profile without adding
+a coloured return layer, texture, pass, or dependency.
+
+The equation is also present in a
+[public reconstruction](https://github.com/medfa12/liquid-glass-react-native/blob/42949c0d7e70dcd53ea3b18a11dd71b3d3caa6d0/src/liquid_glass.glsl).
+That project's claimed Apple disassembly and reference captures are absent from
+its published tree. Its formula is a candidate, not verified Apple source.
+Our support width and gain are selected against the video and native scenes;
+the footage does not identify a unique formula or exact Apple parameters.
+It is animated, and its continuous corners differ from our capsule probe.
+
+In a central 32 px strip across five positions, binary light/dark disagreement
+fell from 190 of 2,092 rows to 11, excluding the outermost 6 px. This measures
+boundary placement only, not colour, highlights, or overall similarity. Two
+positions guided screening; three others checked it. A narrower candidate also
+fit that limited measurement but produced tighter folds in the photographic and
+panel scenes. Additional minification filtering had little visible benefit and
+was not retained. Fine high-contrast grids can still produce thin grazing arcs.
+
+Independent checks cover 32,256 geometric samples, including scale, symmetry,
+rotation, zero refraction and bounded source coordinates. Seven native flat
+panel centres remain pixel-identical to optics23; uniform backgrounds show no
+new broad band. The previous renderer remains available for rollback.
+
+Both normal and reference binaries pass clean builds and match the selected
+candidate in native captures. Loading from the saved Clear setting with no
+renderer loaded, then opening and closing the reference launcher, restores the
+normal renderer while preserving visibility and display layout. The 11 mode
+tests and smoke suite pass; smoke skips Node installation when `mise` is absent.
+An actual reboot was not performed.
+
 ## Build explicitly
 
 Use the matching Hyprland headers and the build dependencies documented by
@@ -716,9 +761,9 @@ exit, and the stock binary is retained:
 (
   set -eu
   glass_repo="$PWD"
-  glass_variant="${GLASS_VARIANT:-optics23}"
+  glass_variant="${GLASS_VARIANT:-optics24}"
   case "$glass_variant" in
-    optics23|optics23-reference) ;;
+    optics24|optics24-reference) ;;
     *) echo "Unknown glass build variant: $glass_variant" >&2; exit 1 ;;
   esac
   glass_build=$(mktemp -d)
@@ -766,7 +811,8 @@ exit, and the stock binary is retained:
   git apply "$glass_repo/scripts/patches/hyprglass-0.10.0-return-band.patch"
   git apply "$glass_repo/scripts/patches/hyprglass-0.10.0-surface-transport.patch"
   git apply "$glass_repo/scripts/patches/hyprglass-0.10.0-equivalent-lens.patch"
-  if [ "$glass_variant" = optics23-reference ]; then
+  git apply "$glass_repo/scripts/patches/hyprglass-0.10.0-compact-profile.patch"
+  if [ "$glass_variant" = optics24-reference ]; then
     git apply "$glass_repo/scripts/patches/hyprglass-0.10.0-reference-radius.patch"
   fi
   make -j2 HYPRGLASS_VERSION="0.10.0-$glass_variant"
@@ -794,18 +840,18 @@ widgets' 44 px corners. At native size the stage is 1531 × 611, with 304 / 434 
 the entire scene down. The actual glass is rendered by HyprGlass, not baked into
 an image or drawn by a browser filter.
 
-The scene needs a separate `optics23-reference` build. It applies the same
-twenty-three optical patches, followed by
+The scene needs a separate `optics24-reference` build. It applies the same
+twenty-four optical patches, followed by
 [reference-radius](../scripts/patches/hyprglass-0.10.0-reference-radius.patch),
 which only raises the preset radius ceiling from 48 to 1024 logical pixels.
 The renderer still clamps each radius to half its surface size. No shader,
 refraction, blur, or lighting formula changes. To build it, set
-`export GLASS_VARIANT=optics23-reference`, run the build recipe above, then
-`unset GLASS_VARIANT`. Keep the ordinary optics23 binary too: the launcher
+`export GLASS_VARIANT=optics24-reference`, run the build recipe above, then
+`unset GLASS_VARIANT`. Keep the ordinary optics24 binary too: the launcher
 temporarily switches to the reference build and restores the ordinary build on
 Close, Escape, `--stop`, terminal interruption, or scene-process exit.
 
-The launcher requires an already active optics23 desktop renderer. It does not
+The launcher requires an already active optics24 desktop renderer. It does not
 save a different material, replace the wallpaper, modify panel geometry, or
 install an autostart/service. An exclusive runtime lock prevents two launchers
 from swapping the same plugin.
@@ -872,7 +918,7 @@ Selecting a material reloads Hyprland's configuration because custom presets
 become active in the plugin's configuration-reloaded callback. The helper
 checks the resulting preset, configuration errors, widget acknowledgements,
 and shader readiness. `liquid` refuses the stock build rather than silently
-falling back to a blurred approximation. Adaptive curved styles require optics23.
+falling back to a blurred approximation. Adaptive curved styles require optics24.
 Each successful selection, including `off`, is saved in the user's persistent
 state directory. The runtime selection remains separate so a failed renderer
 can fall back to ordinary widgets without erasing the last successful choice.

@@ -101,7 +101,11 @@ def parse_manifests(
     include_animation_frames: bool,
     latitude: float,
     longitude: float,
+    viewport_width: int = VIEWPORT_WIDTH,
+    viewport_height: int = VIEWPORT_HEIGHT,
 ) -> dict[str, Any]:
+    if viewport_width <= 0 or viewport_height <= 0:
+        raise ValueError("viewport dimensions must be positive")
     observation_frames = usable_frames(
         observation_manifest, "observation"
     )
@@ -148,10 +152,10 @@ def parse_manifests(
     radar_scale = 1 << (DISPLAY_ZOOM - RADAR_ZOOM)
     radar_x, radar_y = web_mercator_position(latitude, longitude, RADAR_ZOOM)
     radar_origin_x, radar_last_x = intersecting_tile_range(
-        radar_x, VIEWPORT_WIDTH / radar_scale
+        radar_x, viewport_width / radar_scale
     )
     radar_origin_y, radar_last_y = intersecting_tile_range(
-        radar_y, VIEWPORT_HEIGHT / radar_scale
+        radar_y, viewport_height / radar_scale
     )
     frames = []
     for frame, offset_minutes, is_forecast in selected_frames:
@@ -501,6 +505,10 @@ def main() -> int:
         help="download timeout in seconds (default: 15)",
     )
     parser.add_argument("--pretty", action="store_true", help="indent JSON output")
+    parser.add_argument("--viewport-width", type=int, default=VIEWPORT_WIDTH,
+                        help="display width in logical pixels (default: 280)")
+    parser.add_argument("--viewport-height", type=int, default=VIEWPORT_HEIGHT,
+                        help="display height in logical pixels (default: 192)")
     args = parser.parse_args()
 
     try:
@@ -519,6 +527,8 @@ def main() -> int:
             include_animation_frames=False,
             latitude=config.latitude,
             longitude=config.longitude,
+            viewport_width=args.viewport_width,
+            viewport_height=args.viewport_height,
         )
         nearby_precipitation = (
             None
@@ -550,6 +560,8 @@ def main() -> int:
                 include_animation_frames=True,
                 latitude=config.latitude,
                 longitude=config.longitude,
+                viewport_width=args.viewport_width,
+                viewport_height=args.viewport_height,
             )
         radar["nearby_precipitation"] = nearby_precipitation
     except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:

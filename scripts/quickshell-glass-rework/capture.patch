@@ -1,0 +1,149 @@
+diff --git a/src/GlassLayerSurface.cpp b/src/GlassLayerSurface.cpp
+index f5a5665..efbd091 100644
+--- a/src/GlassLayerSurface.cpp
++++ b/src/GlassLayerSurface.cpp
+@@ -13,9 +13,25 @@
+ #include <hyprland/src/managers/SessionLockManager.hpp>
+ #include <hyprland/src/protocols/LayerShell.hpp>
+ #include <hyprland/src/render/OpenGL.hpp>
++#include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
+ #include <hyprland/src/render/Renderer.hpp>
+ #include <hyprutils/math/Misc.hpp>
+ 
++
++namespace {
++// This belongs to the capture adapter, not the optical material. Preserve GL
++// binding state because Hyprland owns the surrounding render pass.
++void prepareClearTexture(GLuint texture) {
++    if (!texture) return;
++    GLint previous = 0;
++    glGetIntegerv(GL_TEXTURE_BINDING_2D, &previous);
++    glBindTexture(GL_TEXTURE_2D, texture);
++    glGenerateMipmap(GL_TEXTURE_2D);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
++    glBindTexture(GL_TEXTURE_2D, previous);
++}
++} // namespace
++
+ static CBox transformedLayerBox(CBox pixelBox, PHLMONITOR monitor) {
+     const auto transform = Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform));
+     pixelBox.transform(transform, monitor->m_transformedSize.x, monitor->m_transformedSize.y).noNegativeSize().round();
+@@ -367,25 +383,9 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha, bool
+     } else if (backgroundChanged) {
+         Diagnostics::recordLayerCacheMiss(monitorId);
+ 
+-        const bool isDark          = resolveThemeIsDark();
+-        const std::string preset   = resolvePresetName();
+-        const SResolveContext ctx  = {preset, isDark, g_pGlobalState->config, g_pGlobalState->customPresets};
+-
+-        float blurStrength   = resolvePresetFloat(ctx, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);
+-        int downscale        = blurStrength >= GlassRenderer::BLUR_DOWNSCALE_THRESHOLD ? GlassRenderer::BLUR_DOWNSCALE_MAX : 1;
+-
+-        GlassRenderer::sampleBackground(m_sampleFramebuffer, xray ? snapshot : source, sampleBox, m_samplePaddingRatio, downscale);
+-
+-        float blurRadius     = blurStrength * 12.0f / downscale;
+-        int blurIterations   = std::clamp(static_cast<int>(resolvePresetInt(ctx, &SPresetValues::blurIterations, &SOverridableConfig::blurIterations)), 1, 5);
+-
+-        if (ctx.config.blurFold && **ctx.config.blurFold) {
+-            const GlassRenderer::SFoldedBlur folded = GlassRenderer::foldBlurPasses(blurRadius, blurIterations);
+-            blurRadius     = folded.radius;
+-            blurIterations = folded.iterations;
+-        }
+-
+-        GlassRenderer::blurBackground(m_sampleFramebuffer, blurRadius, blurIterations, source);
++        GlassRenderer::sampleBackground(m_sampleFramebuffer, xray ? snapshot : source,
++                                        sampleBox, m_samplePaddingRatio, 1);
++        prepareClearTexture(m_sampleFramebuffer->getTexture()->m_texID);
+ 
+         m_hasCachedSample      = true;
+         m_cachedFromSnapshot   = xray;
+@@ -422,12 +422,10 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha, bool
+     g_pHyprRenderer->m_renderData.currentFB = m_surfaceTempFramebuffer;
+     glBindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_surfaceTempFramebuffer.get())->getFBID());
+ 
+-    // Unpadded: the composite quad only ever reads transformBox (rawBox, never
+-    // padded), so the SAMPLE_PADDING_PX-expanded part of a padded clear is never
+-    // sampled — true regardless of mask mode, not the region-sized clear a
+-    // literal reading of "region-aware" would suggest (that would under-clear
+-    // real surface area outside the region that the composite quad does read).
+-    CBox clearBox = transformBox.intersection(CBox{0.0, 0.0, static_cast<double>(monitorWidth), static_cast<double>(monitorHeight)}).noNegativeSize().round();
++    // Include the full lower-mip foreground footprint in the transparent clear.
++    CBox clearBox = transformBox;
++    clearBox.expand(24.0 * (monitor && monitor->m_scale > 0.0f ? monitor->m_scale : 1.0f));
++    clearBox = clearBox.intersection(CBox{0.0, 0.0, static_cast<double>(monitorWidth), static_cast<double>(monitorHeight)}).noNegativeSize().round();
+ 
+     if (std::isfinite(clearBox.x) && std::isfinite(clearBox.y) && std::isfinite(clearBox.w) && std::isfinite(clearBox.h) &&
+         clearBox.w > 0.0 && clearBox.h > 0.0) {
+@@ -487,7 +485,10 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EM
+     const std::string preset   = resolvePresetName();
+     const SResolveContext ctx  = {preset, isDark, g_pGlobalState->config, g_pGlobalState->customPresets};
+ 
+-    float cornerRadius  = 0.0f;
++    const float scale = monitor && monitor->m_scale > 0.0f ? monitor->m_scale : 1.0f;
++    float cornerRadius = maskSource == EMaskSource::ALPHA_THRESHOLD
++        ? resolvePresetFloat(ctx, &SPresetValues::layerRadius, &SOverridableConfig::layerRadius, 0.0f) * scale : 0.0f;
++    cornerRadius = std::min(cornerRadius, static_cast<float>(std::min(rawBox.w, rawBox.h)) * 0.5f);
+     float roundingPower = 2.0f;
+ 
+     // Use the temp FBO's rendered alpha as a mask: glass only where the surface
+@@ -576,6 +577,20 @@ void CGlassLayerSurface::compositeAndRestore(PHLMONITOR monitor, float alpha, EM
+             break;
+     }
+ 
++    // The native foreground stays sharp at LOD 0; lower levels provide a
++    // local coverage estimate for backing immediately behind lettering.
++    prepareClearTexture(maskInfo.textureId);
++
++    // A restrained elevation cue, drawn after capture so it never refracts
++    // into its own glass. Keep it inside the compositor's damage padding.
++    if (cornerRadius > 0.0f) {
++        const int range = std::clamp(static_cast<int>(std::round(4.0f * scale)), 1, GlassRenderer::SAMPLE_PADDING_PX / 2);
++        CBox shadow = rawBox;
++        shadow.expand(range).translate({0.0, static_cast<double>(scale)}).round();
++        const Config::CGradientValueData color{CHyprColor(0.0, 0.0, 0.0, 0.035)};
++        g_pHyprOpenGL->renderRoundedShadow(shadow, static_cast<int>(std::round(cornerRadius)), 2.0f, range, color, alpha);
++    }
++
+     // The glass shader composites both the glass effect and the surface content
+     // in a single pass: glass behind, surface on top, using the temp FBO alpha.
+     GlassRenderer::applyGlassEffect(m_sampleFramebuffer, target,
+diff --git a/src/PluginConfig.cpp b/src/PluginConfig.cpp
+index 8601997..f703568 100644
+--- a/src/PluginConfig.cpp
++++ b/src/PluginConfig.cpp
+@@ -376,6 +376,7 @@ static bool setPresetFloatField(SPresetValues& values, std::string_view key, std
+     auto [ptr, ec] = std::from_chars(valueStr.data(), valueStr.data() + valueStr.size(), parsed);
+     if (ec != std::errc{}) return false;
+ 
++    if (key == "layer_radius") { values.layerRadius = std::clamp(parsed, 0.0f, 1024.0f); return true; }
+     if (key == "blur_strength")        { values.blurStrength = parsed; return true; }
+     if (key == "noise_strength")       { values.noiseStrength = parsed; return true; }
+     if (key == "refraction_strength")  { values.refractionStrength = parsed; return true; }
+@@ -454,6 +455,7 @@ static void mergePresetValues(SPresetValues& target, const SPresetValues& overri
+     mergeFloat(target.vibrancyDarkness, overrides.vibrancyDarkness);
+     mergeFloat(target.adaptiveDim, overrides.adaptiveDim);
+     mergeFloat(target.adaptiveBoost, overrides.adaptiveBoost);
++    mergeFloat(target.layerRadius, overrides.layerRadius);
+     mergeFloat(target.refractionFlow, overrides.refractionFlow);
+     mergeFloat(target.refractionSpread, overrides.refractionSpread);
+     mergeFloat(target.fresnelTint, overrides.fresnelTint);
+diff --git a/src/PluginConfig.hpp b/src/PluginConfig.hpp
+index a04411b..78642df 100644
+--- a/src/PluginConfig.hpp
++++ b/src/PluginConfig.hpp
+@@ -231,6 +231,7 @@ struct SOverridableConfig {
+     Hyprlang::FLOAT* const* vibrancyDarkness    = nullptr;
+     Hyprlang::FLOAT* const* adaptiveDim         = nullptr;
+     Hyprlang::FLOAT* const* adaptiveBoost       = nullptr;
++    Hyprlang::FLOAT* const* layerRadius = nullptr; // Shape geometry only.
+     Hyprlang::FLOAT* const* refractionFlow      = nullptr;
+     Hyprlang::FLOAT* const* refractionSpread    = nullptr;
+     Hyprlang::FLOAT* const* fresnelTint         = nullptr;
+@@ -266,6 +267,7 @@ struct SPresetValues {
+     float   vibrancyDarkness   = static_cast<float>(SENTINEL_FLOAT);
+     float   adaptiveDim        = static_cast<float>(SENTINEL_FLOAT);
+     float   adaptiveBoost      = static_cast<float>(SENTINEL_FLOAT);
++    float   layerRadius = static_cast<float>(SENTINEL_FLOAT);
+     float   refractionFlow     = static_cast<float>(SENTINEL_FLOAT);
+     float   refractionSpread   = static_cast<float>(SENTINEL_FLOAT);
+     float   fresnelTint        = static_cast<float>(SENTINEL_FLOAT);

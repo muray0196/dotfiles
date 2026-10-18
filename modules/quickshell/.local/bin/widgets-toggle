@@ -2,6 +2,14 @@
 
 set -eu
 
+# The integrated desktop has one owner for both sides. Preserve the legacy
+# endpoints when that optional runner has not been started.
+widget_runner=$(dirname "$(readlink -f "$0")")/../../../../scripts/quickshell-widget-preview/desktop.py
+widget_session=${XDG_CACHE_HOME:-$HOME/.cache}/quickshell-widgets/session.json
+if [ -f "$widget_session" ] && [ -f "$widget_runner" ]; then
+    exec /usr/bin/python3 "$widget_runner" toggle
+fi
+
 state=$(/usr/bin/qs --no-color ipc -c clock --any-display prop get widgets visible)
 
 case "$state" in

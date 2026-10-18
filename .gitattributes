@@ -2,3 +2,4 @@
 
 # Empty context lines in unified patches require a space prefix.
 scripts/patches/*.patch whitespace=-blank-at-eol,-blank-at-eof
+scripts/quickshell-glass-rework/*.patch whitespace=-blank-at-eol,-blank-at-eof
