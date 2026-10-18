@@ -121,7 +121,6 @@ print("ok  profile, manifest, package, module, and action consistency")
 PY
 
 python3 "$ROOT/tests/test_search_stack_plugin.py"
-python3 -B "$ROOT/tests/test_freeze_recorder.py"
 python3 -B "$ROOT/tests/test_quickshell_glass.py"
 python3 -B "$ROOT/tests/test_collector_lifetime.py"
 python3 -B "$ROOT/tests/test_weathernews_observation.py"

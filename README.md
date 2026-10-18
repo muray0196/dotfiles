@@ -306,10 +306,6 @@ boundaries are recorded in
 
 Additional setup for GitHub authentication, Docker, SearXNG, and similar tools must be run explicitly from `scripts/`.
 
-For recurring desktop stalls, the optional [freeze recorder](services/freeze-recorder/README.md)
-preserves Quickshell/Hyprland logs and bounded process/pressure samples across
-reboots. Install it explicitly with `python3 scripts/setup-freeze-recorder.py`.
-
 ## Package ownership
 
 System integration and Homebrew prerequisites are installed with `apt` or `pacman`.
