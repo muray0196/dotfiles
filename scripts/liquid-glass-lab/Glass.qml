@@ -19,15 +19,18 @@ Item {
   // A shallow whole-body lens, continuous with the rounded perimeter.
   property real crownHeight: Math.min(width, height) * 0.055 * sizeResponse
   property real magnification: 0
-  // Weak angular spread in radians, projected through the local optical depth.
-  // This softens nearby detail without mixing in the broad analysis blur.
+  // Soft uses restrained local smoothing; Clear explicitly sets this to zero.
   property real transmissionRoughness: 0.008
+  // Interior-only perceptual filtering; false retains the checkpoint's kernel.
+  property bool filterInterior: true
   // Reference studies may explicitly opt into broader diffusion.
   property real softness: 0
   property real edgeSoftness: 0
   property real lighting: 1
   property real ambientReflection: 0
   property real adaptation: 0
+  property real diffusion: 0
+  property color tintColor: "transparent"
   property real refraction: 1
   property real shadowStrength: 0.08 + 0.1 * sizeResponse
   // Optical strength, never item opacity: zero must reproduce the backdrop.
@@ -56,11 +59,15 @@ Item {
     property real crownHeight: glass.crownHeight
     property real magnification: glass.magnification
     property real transmissionRoughness: glass.transmissionRoughness * glass.presence
+    property real interiorFiltering: glass.filterInterior ? 1 : 0
     property real softness: glass.softness * glass.presence
     property real edgeSoftness: glass.edgeSoftness * glass.presence
     property real lighting: glass.lighting * glass.presence
     property real ambientReflection: glass.ambientReflection * glass.presence
     property real adaptation: glass.adaptation * glass.presence
+    property real diffusion: glass.diffusion * glass.presence
+    property vector4d tint: Qt.vector4d(glass.tintColor.r, glass.tintColor.g,
+                                      glass.tintColor.b, glass.tintColor.a * glass.presence)
     property real refraction: glass.refraction * glass.presence
     property real shadowStrength: glass.shadowStrength * glass.presence
     property vector2d lightDirection: glass.lightDirection

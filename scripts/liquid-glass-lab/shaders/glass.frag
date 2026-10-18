@@ -16,11 +16,14 @@ layout(std140, binding = 0) uniform Material {
   float crownHeight;
   float magnification;
   float transmissionRoughness;
+  float interiorFiltering;
   float softness;
   float edgeSoftness;
   float lighting;
   float ambientReflection;
   float adaptation;
+  float diffusion;
+  vec4 tint;
   float refraction;
   float shadowStrength;
   vec2 lightDirection;
@@ -115,10 +118,19 @@ void main() {
     vec2 direction = ray.xy / max(length(ray.xy), 0.0001);
     // Bound the largest standard deviation to two logical source pixels.
     float spread = min(transmissionRoughness * (thickness + surfaceZ), 2.0 * cosine * cosine);
+    // Keep the entire committed bevel untouched. Beyond it, ease into interior
+    // filtering with a narrower 1.6-logical-pixel bound.
+    // The radius still follows optical depth and fades with material presence.
+    float face = interiorFiltering * smoothstep(bevel, bevel + max(12.0, 0.75 * bevel), depth);
+    spread = mix(spread, min(spread * 1.2, 1.6 * cosine * cosine), face);
     float elongation = 1.0 / cosine - 1.0;
     vec2 alongX = (vec2(1.0, 0.0) + elongation * direction * direction.x) * spread / cosine;
     vec2 alongY = (vec2(0.0, 1.0) + elongation * direction * direction.y) * spread / cosine;
     vec3 transmitted = vec3(0.0);
+    vec3 encoded = vec3(0.0);
+    // Cover gaps between the wider interior taps using the existing mip chain.
+    // Keep the committed geometric footprint throughout the protected bevel.
+    float tapFootprint = max(1.0, face * spread / cosine);
     for (int y = -2; y <= 2; ++y) {
       for (int x = -2; x <= 2; ++x) {
         // A denser binomial footprint avoids separated replicas of sharp
@@ -127,13 +139,20 @@ void main() {
         float wy = y == 0 ? 6.0 : (abs(y) == 1 ? 4.0 : 1.0);
         float weight = wx * wy / 256.0;
         vec2 offset = (float(x) * alongX + float(y) * alongY) / backdropSize;
-        // Keep the lens's existing pixel footprint at each tap. Derivatives of
-        // changing tap offsets would otherwise introduce extra mipmap blur.
-        vec3 sampleColor = textureGrad(backdrop, clamp(uv + offset, inset, 1.0 - inset), dx, dy).rgb;
-        transmitted += weight * linearColor(sampleColor);
+        // Explicit gradients avoid unintended derivatives of the tap offsets.
+        vec3 sampleColor = textureGrad(backdrop, clamp(uv + offset, inset, 1.0 - inset),
+                                      dx * tapFootprint, dy * tapFootprint).rgb;
+        // The flat interior uses only encoded RGB. Avoid converting taps whose
+        // linear-light result would be discarded; retain it throughout the bevel.
+        if (face < 1.0) transmitted += weight * linearColor(sampleColor);
+        encoded += weight * sampleColor;
       }
     }
-    sharp = displayColor(transmitted);
+    // Perceptual filtering preserves the displayed average of mixed detail,
+    // avoiding the linear-light kernel's brightness lift in the flat face.
+    // This is an independent UI choice, not recovered Apple color handling.
+    sharp = encoded;
+    if (face < 1.0) sharp = mix(displayColor(transmitted), encoded, face);
   }
   vec3 soft = texture(softenedBackdrop, uv).rgb;
   float scattering = mix(edgeSoftness, softness, smoothstep(0.0, edgeWidth * 1.25, depth));
@@ -144,6 +163,14 @@ void main() {
   float luma = dot(ambient, vec3(0.2126, 0.7152, 0.0722));
   vec3 tone = mix(vec3(0.18, 0.20, 0.24), vec3(0.96, 0.975, 1.0), smoothstep(0.2, 0.75, luma));
   material = mix(material, tone, adaptation * (0.045 + 0.075 * scattering));
+
+  // Tint colors the transmitted image without changing its sampling or optics.
+  float support = smoothstep(0.0, min(12.0, bevel), depth);
+  if (diffusion > 0.0 || tint.a > 0.0) {
+    vec3 face = mix(material, soft, 0.85 * diffusion);
+    face = mix(face, tint.rgb, tint.a);
+    material = mix(material, face, support);
+  }
 
   // A finite source in backdrop coordinates gives a straight edge a changing
   // incident direction along its length. A uniform direction made the whole

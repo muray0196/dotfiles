@@ -8,12 +8,15 @@
 #include <map>
 #include <sstream>
 #include "desktop-gpu.hpp"
+#include "desktop-tints.hpp"
 
 namespace {
 CHyprSignalListener beforeRender, stage, monitorRemoved;
 std::map<MONITORID, GlassGPU::Renderer> renderers;
 std::map<MONITORID, CBox> previous;
 double presence = 1;
+std::string clarity = "soft";
+size_t tintIndex = 0;
 std::string failure;
 
 bool supported(PHLMONITOR monitor) {
@@ -74,7 +77,8 @@ public:
   std::vector<UP<IPassElement>> draw() override {
     if (capture.empty() || !failure.empty()) return {};
     try {
-      renderers[monitor->m_id].render({capture.x, capture.y, capture.w, capture.h}, items, monitor->m_scale, presence,
+      renderers[monitor->m_id].render({capture.x, capture.y, capture.w, capture.h}, items, monitor->m_scale, presence, clarity == "soft",
+                                     clarity == "diffused", GlassTints::presets[tintIndex].color,
                                      monitor->m_size.x, monitor->m_size.y);
     } catch (const std::exception& e) {
       failure = e.what();
@@ -87,15 +91,23 @@ public:
 std::string status() {
   uint64_t frames = 0, samples = 0;
   double cpu = 0, gpu = 0, gpuMax = 0;
+  float sourceAnisotropy = 0, maxAnisotropy = 0;
   for (const auto& [id, renderer] : renderers) {
     frames += renderer.frames; samples += renderer.samples; cpu += renderer.cpuTotal;
     gpu += renderer.gpuTotal; gpuMax = std::max(gpuMax, renderer.gpuMax);
+    if (renderer.frames) {
+      sourceAnisotropy = sourceAnisotropy ? std::min(sourceAnisotropy, renderer.appliedAnisotropy) : renderer.appliedAnisotropy;
+      maxAnisotropy = maxAnisotropy ? std::min(maxAnisotropy, renderer.maxAnisotropy) : renderer.maxAnisotropy;
+    }
   }
   std::ostringstream out;
   out << "{\"frames\":" << frames << ",\"gpu_samples\":" << samples
       << ",\"cpu_submit_ms\":" << (frames ? cpu / frames : 0)
       << ",\"gpu_ms\":" << (samples ? gpu / samples : 0) << ",\"gpu_max_ms\":" << gpuMax
-      << ",\"failed\":" << (!failure.empty() ? "true" : "false") << ",\"presence\":" << presence << "}";
+      << ",\"failed\":" << (!failure.empty() ? "true" : "false") << ",\"presence\":" << presence
+      << ",\"source_anisotropy\":" << (sourceAnisotropy ? sourceAnisotropy : 1)
+      << ",\"max_anisotropy\":" << (maxAnisotropy ? maxAnisotropy : 1)
+      << ",\"clarity\":\"" << clarity << "\",\"tint\":\"" << GlassTints::presets[tintIndex].name << "\"}";
   return out.str();
 }
 }
@@ -107,6 +119,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
   if (g_pHyprRenderer->type() != Render::IHyprRenderer::RT_GL)
     throw std::runtime_error("Liquid Glass requires OpenGL");
   presence = 1;
+  clarity = "soft";
+  tintIndex = 0;
   failure.clear();
   beforeRender = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
     auto area = region(bodies(monitor), monitor);
@@ -134,9 +148,27 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     std::string name, operation, extra;
     input >> name;
     if (!(input >> operation)) return status();
+    if (operation == "clarity") {
+      std::string value;
+      if (!(input >> value) || (input >> extra) || (value != "clear" && value != "soft" && value != "diffused"))
+        return std::string("error: expected liquidglass clarity <clear|soft|diffused>");
+      clarity = value;
+      damageAll(); return status();
+    }
+    if (operation == "tint") {
+      std::string value;
+      if ((input >> value) && !(input >> extra)) {
+        for (size_t i = 0; i < GlassTints::presets.size(); ++i) {
+          if (value != GlassTints::presets[i].name) continue;
+          tintIndex = i;
+          damageAll(); return status();
+        }
+      }
+      return std::string("error: expected liquidglass tint <") + GlassTints::options + ">";
+    }
     double number;
     if (operation != "presence" || !(input >> number) || (input >> extra) || !std::isfinite(number) || number < 0 || number > 1)
-      return std::string("error: expected liquidglass presence <0..1>");
+      return std::string("error: expected liquidglass presence <0..1>, clarity <clear|soft|diffused>, or tint <preset>");
     presence = number; damageAll(); return status();
   }});
   damageAll();

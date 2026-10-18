@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
       files.append(name + ".png");
     };
     set("showTools", false);
-    save("clear-normal-no-controls");
+    save("soft-normal-no-controls");
     auto* provenance = root->findChild<QQuickItem*>("previewProvenance");
     if (!provenance || !provenance->isVisible()
         || !provenance->property("text").toString().contains("DEMONSTRATION DATA"))
@@ -73,14 +73,14 @@ int main(int argc, char** argv) {
     set("showTools", true);
     for (int direction = 0; direction < 3; ++direction) {
       set("direction", direction);
-      save(QString("direction-%1-clear").arg(direction));
+      save(QString("direction-%1-soft").arg(direction));
     }
     set("direction", 0);
     for (int background = 0; background < 5; ++background) {
       set("background", background);
-      save(QString("clear-%1").arg(QStringList{"flower", "desert", "bright", "dark", "detail"}[background]));
+      save(QString("soft-%1").arg(QStringList{"flower", "desert", "bright", "dark", "detail"}[background]));
     }
-    set("background", 2); set("darkText", true); save("clear-bright-dark-text");
+    set("background", 2); set("darkText", true); save("soft-bright-dark-text");
     set("darkText", false);
     // Freeze data, change only the underlying imagery, and compare actual
     // foreground RGBA renders. This catches both ink flips and moving halos.
@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
       }
     }
     set("darkText", false); set("phase", 0.0); set("background", 1);
-    set("scenario", 1); save("clear-long-values");
+    set("scenario", 1); save("soft-long-values");
     bool tooltipChecked = false;
     // Repeater delegates belong to the visual tree, but are not necessarily
     // QObject descendants. Inspect their labels as well as static children.
@@ -125,7 +125,7 @@ int main(int argc, char** argv) {
     }
     if (!tooltipChecked) throw std::runtime_error("long text could not be inspected on hover");
     QTest::mouseMove(&view, QPoint(960, 540));
-    set("scenario", 2); save("clear-missing-data");
+    set("scenario", 2); save("soft-missing-data");
     set("scenario", 0); set("background", 0);
     auto* foregroundButton = root->findChild<QQuickItem*>("foregroundButton");
     if (!foregroundButton) throw std::runtime_error("foreground control missing");
@@ -154,13 +154,13 @@ int main(int argc, char** argv) {
       data["frozen"] = true;
       set("readings", data.toVariantMap());
       QTest::qWait(2500);
-      save("clear-collector-snapshot");
-      set("darkText", true); save("clear-dark-text-collector-snapshot"); set("darkText", false);
+      save("soft-collector-snapshot");
+      set("darkText", true); save("soft-dark-text-collector-snapshot"); set("darkText", false);
       set("scenario", 2); set("scenario", 0);
     }
     if (QString::fromLocal8Bit(argv[3]) == "motion") {
       QProcess encoder;
-      encoder.start("ffmpeg", {"-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", "1920x1080", "-framerate", "20", "-i", "pipe:0", "-an", "-c:v", "libx264", "-crf", "19", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output.filePath("clear-motion.mp4")});
+      encoder.start("ffmpeg", {"-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", "1920x1080", "-framerate", "20", "-i", "pipe:0", "-an", "-c:v", "libx264", "-crf", "19", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output.filePath("soft-motion.mp4")});
       if (!encoder.waitForStarted()) throw std::runtime_error("ffmpeg unavailable");
       for (int frame = 0; frame < 120; ++frame) {
         set("background", frame < 60 ? 0 : 1);
@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
       }
       encoder.closeWriteChannel();
       if (!encoder.waitForFinished(20000) || encoder.exitCode()) throw std::runtime_error(encoder.readAllStandardError().toStdString());
-      files.append("clear-motion.mp4");
+      files.append("soft-motion.mp4");
     }
     QFile report(output.filePath("results.json"));
     if (!report.open(QIODevice::WriteOnly)) throw std::runtime_error("report write failed");

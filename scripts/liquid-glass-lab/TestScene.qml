@@ -14,6 +14,7 @@ Item {
   property real backingDistance: 36
   property real optics: 0
   property real transmissionRoughness: 0
+  property bool filterInterior: true
   property real softness: 0
   property real edgeSoftness: 0
   property real lighting: 0
@@ -51,6 +52,7 @@ Item {
     thickness: fixture.backingDistance
     refraction: fixture.optics
     transmissionRoughness: fixture.transmissionRoughness
+    filterInterior: fixture.filterInterior
     softness: fixture.softness
     edgeSoftness: fixture.edgeSoftness
     lighting: fixture.lighting

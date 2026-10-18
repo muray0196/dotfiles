@@ -70,11 +70,12 @@ Item {
     }
   }
   Material.BackdropSource { id: pool; sourceItem: backdrop; blurRadius: 20 }
-  // 0: two rails. 1: independent modules. 2: two staggered upper/lower pairs.
+  // 0: lens and instruments. 1/2: historical independent/shelf studies.
   Repeater {
-    model: composition.direction === 0 ? [
-      {x: composition.leftX, y: Layout.topInset, w: Layout.panelWidth, h: Layout.panelHeight}, {x: composition.rightX, y: Layout.topInset, w: Layout.panelWidth, h: Layout.panelHeight}
-    ] : composition.direction === 1 ? [
+    model: composition.direction === 0 ? Layout.panelKinds.map(kind => {
+      const panel = Layout.panel(kind, composition.readings);
+      return {x: panel.left ? composition.leftX : composition.rightX, y: Layout.topInset + panel.y, w: Layout.panelWidth, h: panel.height};
+    }) : composition.direction === 1 ? [
       {x: composition.leftX, y: 36, w: 400, h: 553}, {x: composition.leftX, y: 605, w: 400, h: 270},
       {x: composition.leftX + 426, y: 753, w: 400, h: 291},
       {x: composition.rightX, y: 36, w: 400, h: 418}, {x: composition.rightX, y: 470, w: 400, h: 390},
@@ -89,8 +90,17 @@ Item {
     objectName: "widgetForeground"
     anchors.fill: parent
     visible: composition.showForeground
-    PanelContent { id: leftPanel; state: composition; leftSide: true; x: composition.leftX; y: Layout.topInset; visible: composition.direction === 0 }
-    PanelContent { id: rightPanel; state: composition; x: composition.rightX; y: Layout.topInset; visible: composition.direction === 0 }
+    Repeater {
+      id: panels
+      model: Layout.panelKinds
+      PanelContent {
+        required property string modelData
+        state: composition; kind: modelData
+        x: geometry.left ? composition.leftX : composition.rightX
+        y: Layout.topInset + geometry.y
+        visible: composition.direction === 0
+      }
+    }
     Machine { id: local; visible: composition.direction !== 0; objectName: "localMachine"; scene: composition; x: composition.leftX + 28; y: 64; width: composition.contentWidth; reading: composition.readings.local || {} }
     Machine { id: main; visible: composition.direction !== 0; objectName: "mainMachine"; scene: composition; x: composition.leftX + 28; y: composition.direction === 0 ? 585 : 630; width: composition.contentWidth; reading: composition.readings.main || {}; remote: true }
     History { id: history; visible: composition.direction !== 0; scene: composition; x: composition.leftX + 28 + (composition.direction === 1 ? 426 : composition.direction === 2 ? 400 : 0); y: composition.direction === 2 ? 630 : 781; width: composition.contentWidth }
@@ -105,13 +115,13 @@ Item {
     width: Math.max(controls.width + 32, studyTitle.implicitWidth + 32); height: 80; radius: 24
     visible: composition.showTools
     color: "#eceef1f3"
-    Text { id: studyTitle; x: 16; y: 10; text: "WIDGET STUDY  /  " + ["Duet · continuous rails", "Islands · six surfaces", "Split · workstation shelf"][composition.direction] + "  /  " + composition.dataProvenance; color: "#435362"; font { family: "Adwaita Sans"; pixelSize: 10; weight: Font.DemiBold } }
+    Text { id: studyTitle; x: 16; y: 10; text: "WIDGET STUDY  /  " + ["Lens and instruments", "Islands · six surfaces", "Split · workstation shelf"][composition.direction] + "  /  " + composition.dataProvenance; color: "#435362"; font { family: "Adwaita Sans"; pixelSize: 10; weight: Font.DemiBold } }
     Row {
       id: controls
       x: 16; y: 34; spacing: 6
       Button { objectName: "foregroundButton"; scene: composition; text: composition.darkText ? "Dark text" : "Light text"; onClicked: composition.darkText = !composition.darkText }
       Button { scene: composition; text: ["Flower", "Desert", "Bright", "Dark", "Detail"][composition.background]; onClicked: composition.background = (composition.background + 1) % 5 }
-      Button { scene: composition; text: ["Duet", "Islands", "Split"][composition.direction]; onClicked: composition.direction = (composition.direction + 1) % 3 }
+      Button { scene: composition; text: ["Lens", "Islands", "Split"][composition.direction]; onClicked: composition.direction = (composition.direction + 1) % 3 }
       Button { scene: composition; text: ["Normal", "Long values", "Missing data"][composition.scenario]; onClicked: composition.scenario = (composition.scenario + 1) % 3 }
       Button { scene: composition; text: composition.animated ? "Pause" : "Motion"; onClicked: composition.animated = !composition.animated }
     }
@@ -123,7 +133,11 @@ Item {
   }
   // Used by the renderer to check that critical content remains inside the body.
   function audit() {
-    if (direction === 0) return Object.assign({}, leftPanel.audit(), rightPanel.audit());
+    if (direction === 0) {
+      const result = {};
+      for (let index = 0; index < panels.count; index++) Object.assign(result, panels.itemAt(index).audit());
+      return result;
+    }
     return { localBottom: local.y + local.implicitHeight, mainBottom: main.y + main.implicitHeight,
       historyBottom: history.y + history.implicitHeight, todayBottom: today.y + today.implicitHeight,
       weatherBottom: weather.y + weather.implicitHeight, radarBottom: radar.y + radar.implicitHeight };

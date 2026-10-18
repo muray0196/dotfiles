@@ -3,18 +3,17 @@ import Quickshell
 
 ShellRoot {
   FloatingWindow {
-    id: window
-    title: "Liquid Glass — independent optical study"
+    title: "Liquid Glass — Playground"
     implicitWidth: 1120
-    implicitHeight: 760
-    minimumSize: Qt.size(1120, 760)
-    maximumSize: Qt.size(1120, 760)
+    implicitHeight: 800
+    minimumSize: Qt.size(1120, 800)
+    maximumSize: Qt.size(1120, 800)
     color: "#fafbfc"
     visible: true
-    Scene {
+    Playground {
       anchors.fill: parent
       animated: Quickshell.env("LIQUID_GLASS_LAB_PAUSED") !== "1"
-      pattern: Number(Quickshell.env("LIQUID_GLASS_LAB_SCENE") || "4")
+      onCloseRequested: Qt.quit()
     }
   }
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build, run, and verify the independent Quickshell optical prototype."""
+"""Build, run, and verify the shared-material Quickshell playground."""
 
 import argparse
 import os
@@ -11,7 +11,6 @@ import sys
 
 SOURCE = Path(__file__).resolve().parent
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "dotfiles-liquid-glass-lab"
-SCENES = ("color", "grid", "type", "contrast", "flower", "desert", "boundary", "lighting", "panel", "size")
 
 
 def run_checked(args, **kwargs):
@@ -26,11 +25,19 @@ def build(program=None):
     if not Path(qsb).is_file():
         raise RuntimeError("Qt Shader Tools (qsb) is required; no packages were installed.")
     CACHE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    from desktop_build import write_tints
+
+    write_tints(SOURCE, CACHE)
+    # Remove only generated files belonging to the retired reference window.
+    for name in ("Scene.qml", "ReferenceStudy.qml", "SizeStudy.qml", "study.frag.qsb", "record"):
+        (CACHE / name).unlink(missing_ok=True)
     for source in sorted((SOURCE / "shaders").glob("*.frag")):
         target = CACHE / (source.name + ".qsb")
         run_checked([qsb, "--glsl", "150,300 es", "-o", str(target), str(source)])
     for source in SOURCE.glob("*.qml"):
         shutil.copy2(source, CACHE / source.name)
+    (CACHE / "widget").mkdir(exist_ok=True)
+    shutil.copy2(SOURCE / "widget/Label.qml", CACHE / "widget/Label.qml")
     for name in ("flower.png", "desert.png"):
         shutil.copy2(SOURCE / "assets" / name, CACHE / name)
     if program:
@@ -44,20 +51,29 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("build", help="compile shaders; write only to the bounded lab cache")
-    sub.add_parser("stop", help="close only this prototype's Quickshell instance")
+    sub.add_parser("stop", help="close only the playground's Quickshell instance")
     sub.add_parser("desktop-probe", help="verify backdrop ordering in a disposable nested Hyprland session")
     sub.add_parser("desktop-check", help="test GPU desktop glass in isolated compositors at scales 1, 1.25, and 2")
     sub.add_parser("desktop", help="launch the tested independent clock on the current desktop")
     sub.add_parser("desktop-stop", help="close the independent desktop clock and unload only its backend")
     sub.add_parser("desktop-record", help="record desktop glass over a separate Wayland window in an isolated compositor")
-    launch = sub.add_parser("run", help="open a separate Quickshell test window")
+    benchmark = sub.add_parser("benchmark", help="compare Clear quality and GPU cost offscreen; never loads a live plugin")
+    benchmark.add_argument("--device", required=True, help="explicit GPU render node, e.g. /dev/dri/renderD128")
+    benchmark.add_argument("--frames", type=int, default=512, help="timed frames per case (default: 512)")
+    benchmark.add_argument("--repeats", type=int, default=3, help="shuffled repeats (default: 3)")
+    benchmark.add_argument("--motion", action="store_true", help="also record subpixel motion comparisons")
+    benchmark.add_argument("--power-seconds", type=int, default=0, help="optional 4..60-second trials at 60 fps using the GPU board sensor")
+    launch = sub.add_parser("run", help="open the shared-material Quickshell playground")
     launch.add_argument("--paused", action="store_true", help="start with background motion paused")
-    launch.add_argument("--scene", choices=SCENES, default="flower", help="initial study (default: flower)")
     sub.add_parser("check", help="run GPU pixel and interaction checks at scale 1 and 2; needs a display")
-    record = sub.add_parser("record", help="render a repeatable 6-second study; needs a display and ffmpeg")
-    record.add_argument("--scene", choices=SCENES[4:], default="flower", help="study to render (default: flower)")
     args = parser.parse_args()
     try:
+        if args.command == "benchmark":
+            import benchmark
+
+            benchmark.run(SOURCE, CACHE / "clear-benchmark", args.device, args.frames, args.repeats,
+                          args.motion, args.power_seconds)
+            return 0
         if args.command in ("desktop", "desktop-check", "desktop-stop", "desktop-record"):
             import desktop
 
@@ -79,11 +95,10 @@ def main():
             return 0
         if args.command == "stop":
             return subprocess.call(["qs", "kill", "--path", str(CACHE / "shell.qml")])
-        build(program={"check": "proof", "record": "record"}.get(args.command))
+        build(program="proof" if args.command == "check" else None)
         if args.command == "run":
             env = os.environ.copy()
             env["LIQUID_GLASS_LAB_PAUSED"] = "1" if args.paused else "0"
-            env["LIQUID_GLASS_LAB_SCENE"] = str(SCENES.index(args.scene))
             return subprocess.call(["qs", "--no-duplicate", "--path", str(CACHE / "shell.qml")], env=env)
         if args.command == "check":
             for scale in (1, 2):
@@ -97,12 +112,6 @@ def main():
                     print(result.stderr, file=sys.stderr, end="")
                 if result.returncode:
                     return result.returncode
-        if args.command == "record":
-            env = os.environ.copy()
-            env["QT_SCALE_FACTOR"] = "1"
-            env.setdefault("QSG_RHI_BACKEND", "opengl")
-            return subprocess.run([str(CACHE / "record"), str(CACHE),
-                                   str(SCENES.index(args.scene)), args.scene], env=env, timeout=120).returncode
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
         print(f"liquid-glass-lab: {error}", file=sys.stderr)
         return 1

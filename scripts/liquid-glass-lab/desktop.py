@@ -16,7 +16,7 @@ from desktop_build import build, publish
 
 def fingerprint(source):
     names = ("desktop.cpp", "desktop-gpu.hpp", "desktop_build.py", "desktop.py", "lab.py", "DesktopWidget.qml", "desktop-shell.qml",
-             "shaders/glass.frag", "shaders/blur.frag")
+             "shaders/glass.frag", "shaders/blur.frag", "tints.json")
     digest = hashlib.sha256()
     for name in names:
         digest.update(name.encode() + b"\0" + (source / name).read_bytes())
@@ -171,9 +171,11 @@ def reload_check(source, output, control, shell, photo, compare, instance, plugi
 
     loaded = load(plugin)
     baseline = photo("reload-baseline")
-    checks["same_binary_reloads_and_renders"] = (loaded["presence"] == 1 and not loaded["failed"]
+    checks["same_binary_reloads_and_renders"] = (loaded["presence"] == 1 and loaded["clarity"] == "soft" and loaded["tint"] == "off" and not loaded["failed"]
                                                  and compare(plain, baseline) > 0.1)
     control("liquidglass", "presence", "0.37")
+    control("liquidglass", "clarity", "clear")
+    control("liquidglass", "tint", "black")
     unload(plugin)
 
     # A real rebuild with a changed default proves that the replacement's code
@@ -182,6 +184,7 @@ def reload_check(source, output, control, shell, photo, compare, instance, plugi
         variant = Path(directory)
         shutil.copy2(source / "desktop-gpu.hpp", variant)
         shutil.copytree(source / "shaders", variant / "shaders")
+        shutil.copy2(source / "tints.json", variant / "tints.json")
         original = (source / "desktop.cpp").read_text()
         changed = original.replace("  presence = 1;\n", "  presence = 0.75;\n")
         if changed == original:
@@ -202,8 +205,11 @@ def reload_check(source, output, control, shell, photo, compare, instance, plugi
     for index in range(2):
         loaded = load(plugin)
         restored = photo(f"reload-restored-{index}")
-        repeated.append(loaded["presence"] == 1 and not loaded["failed"] and compare(baseline, restored) < 0.05)
+        repeated.append(loaded["presence"] == 1 and loaded["clarity"] == "soft" and loaded["tint"] == "off" and not loaded["failed"]
+                        and compare(baseline, restored) < 0.05)
         control("liquidglass", "presence", "0.37")
+        control("liquidglass", "clarity", "diffused")
+        control("liquidglass", "tint", "black")
         unload(plugin)
         repeated.append(str(plugin) not in maps.read_text())
     checks["repeated_reload_resets_state_and_releases_library"] = all(repeated)
@@ -248,6 +254,81 @@ def check(source, output, scale=1):
         checks["real_window_is_refracted"] = compare(plain, glass) > 0.1
         stable = photo("stable")
         checks["stationary_source_does_not_feed_back"] = compare(glass, stable) < 0.05
+        checks["defaults_soft_and_tint_off"] = status["clarity"] == "soft" and status["tint"] == "off"
+        control("liquidglass", "clarity", "clear")
+        clear = photo("clear")
+        checks["soft_gently_smooths_clear"] = compare(glass, clear) > 0.01
+        control("liquidglass", "clarity", "soft")
+        checks["soft_round_trip_is_exact"] = compare(glass, photo("soft-restored")) < 0.05
+        palette = json.loads((source / "tints.json").read_text())
+        for clarity in ("clear", "soft", "diffused"):
+            control("liquidglass", "clarity", clarity)
+            control("liquidglass", "tint", "off")
+            natural = photo(clarity + "-off")
+            filtering = json.loads(control("liquidglass"))
+            expected_anisotropy = min(4, filtering["max_anisotropy"]) if clarity == "clear" else 1
+            checks[f"{clarity}_source_filter_matches_selected_mode"] = filtering["source_anisotropy"] == expected_anisotropy
+            for tint in palette:
+                selected = json.loads(control("liquidglass", "tint", tint))
+                tinted = photo(f"{clarity}-{tint}-tint")
+                changed = compare(natural, tinted)
+                checks[f"{clarity}_{tint}_independent_tint"] = (
+                    selected["clarity"] == clarity and selected["tint"] == tint
+                    and (changed < 0.05 if tint == "off" else changed > 0.5)
+                    and selected["source_anisotropy"] == expected_anisotropy)
+                control("liquidglass", "presence", "0")
+                checks[f"{clarity}_{tint}_zero_presence_is_identity"] = compare(plain, photo(f"{clarity}-{tint}-identity")) < 0.05
+                control("liquidglass", "presence", "1")
+            checks[f"{clarity}_tint_has_no_feedback"] = compare(tinted, photo(clarity + "-stable")) < 0.05
+            control("liquidglass", "tint", "off")
+            checks[f"{clarity}_tint_off_round_trip_is_exact"] = compare(natural, photo(clarity + "-tint-restored")) < 0.05
+        control("liquidglass", "tint", "blue")
+        control("liquidglass", "clarity", "soft")
+        selected = json.loads(control("liquidglass"))
+        checks["clarity_selection_preserves_tint"] = selected["tint"] == "blue" and selected["clarity"] == "soft"
+        for attribute, values in (("clarity", "clear|soft|diffused"), ("tint", "|".join(palette))):
+            rejected = [subprocess.run(["hyprctl", "-i", instance["instance"], "liquidglass", attribute, *args],
+                                       capture_output=True, text=True, timeout=10)
+                        for args in ((), ("invalid",), (selected[attribute], "extra"))]
+            current = json.loads(control("liquidglass"))
+            checks[f"invalid_{attribute}_requests_leave_state_unchanged"] = (
+                all(result.returncode != 0 and f"error: expected liquidglass {attribute} <{values}>"
+                    in result.stdout + result.stderr for result in rejected)
+                and all(current[key] == selected[key] for key in ("clarity", "tint")))
+
+        def interior(shot):
+            width, _, pixels = shot
+            values, differences = [], []
+            for y in range(round(290 * scale), round(390 * scale)):
+                row = pixels[(y * width + round(290 * scale)) * 3:(y * width + round(490 * scale)) * 3]
+                values.extend(row)
+                differences.extend((a - b) ** 2 for a, b in zip(row[3:], row[:-3]))
+            return max(values), sum(differences) / len(differences), sum(values) / len(values)
+
+        for pattern, name in ((1, "bright"), (2, "dark")):
+            ipc(fixture, "fixture", "pattern", pattern)
+            control("liquidglass", "clarity", "clear")
+            control("liquidglass", "tint", "off")
+            original = photo("clear-" + name)
+            control("liquidglass", "clarity", "diffused")
+            control("liquidglass", "tint", "black")
+            supported = photo("diffused-dark-" + name)
+            peak, detail, tinted_mean = interior(supported)
+            _, original_detail, original_mean = interior(original)
+            checks[f"diffused_dark_{name}_interior_limits_brightness"] = peak <= 120
+            checks[f"diffused_dark_{name}_reduces_competing_detail"] = detail < original_detail * 0.5
+            control("liquidglass", "tint", "off")
+            untinted = photo("diffused-" + name)
+            _, soft_detail, soft_mean = interior(untinted)
+            checks[f"diffused_{name}_retains_background_brightness"] = soft_mean >= original_mean * 0.9
+            checks[f"diffused_{name}_reduces_competing_detail"] = soft_detail < original_detail * 0.75
+            checks[f"diffused_{name}_has_no_dark_backing"] = soft_mean > tinted_mean + 10
+            control("liquidglass", "tint", "black")
+            checks[f"diffused_{name}_tint_restores_without_filter_change"] = compare(supported, photo("tint-restored-" + name)) < 0.05
+        ipc(fixture, "fixture", "pattern", 0)
+        control("liquidglass", "clarity", "soft")
+        control("liquidglass", "tint", "off")
+        checks["soft_restored_without_retuning"] = compare(glass, photo("soft-final")) < 0.05
         control("liquidglass", "presence", "0")
         identity = photo("identity")
         checks["zero_strength_matches_uncovered_window"] = compare(plain, identity) < 0.05
@@ -343,7 +424,8 @@ def check(source, output, scale=1):
         print(f"Compositor timing: {json.dumps(after_idle)}", flush=True)
         if not all(checks.values()):
             raise RuntimeError(f"Desktop checks failed; evidence: {output}")
-        for name in ("stable", "identity", "off-grid", "hidden", "restored", "unloaded", "after-unload"):
+        for name in ("stable", "identity", "off-grid", "hidden", "restored", "unloaded", "after-unload",
+                     "soft-restored", "soft-final"):
             (output / f"{name}.png").unlink(missing_ok=True)
     print(f"PASS {len(checks)} desktop GPU checks at scale {scale}; evidence: {output}", flush=True)
 

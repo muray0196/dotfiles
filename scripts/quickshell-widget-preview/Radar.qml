@@ -13,7 +13,11 @@ Item {
   readonly property var frames: reading.frames || []
   property int frameIndex: 0
   property bool playing: false
-  readonly property var frame: frames[frameIndex] || {}
+  property var frozenState: null
+  readonly property int displayedFrameIndex: frozenState ? frozenState.frameIndex : frameIndex
+  readonly property bool displayedPlaying: frozenState ? frozenState.playing : playing
+  readonly property var frame: frames[displayedFrameIndex] || {}
+  function snapshot() { return {frameIndex: displayedFrameIndex, playing: displayedPlaying}; }
   property bool tileFailed: false
   onFramesChanged: {
     frameIndex = Math.max(0, frames.findIndex(f => f.offset_minutes === 0));
@@ -98,11 +102,11 @@ Item {
           required property int index
           scene: radar.scene; overlay: true
           text: modelData.offset_minutes === 0 ? "Latest" : (modelData.offset_minutes > 0 ? "+" : "") + modelData.offset_minutes + "m"
-          selected: radar.frameIndex === index
+          selected: radar.displayedFrameIndex === index
           onClicked: { radar.frameIndex = index; radar.playing = false; radar.tileFailed = false; }
         }
       }
-      Button { scene: radar.scene; overlay: true; text: radar.playing ? "Pause radar animation" : "Play radar animation"; icon: radar.playing ? "\ue034" : "\ue037"; visible: radar.frames.length > 1; onClicked: radar.playing = !radar.playing }
+      Button { scene: radar.scene; overlay: true; text: radar.displayedPlaying ? "Pause radar animation" : "Play radar animation"; icon: radar.displayedPlaying ? "\ue034" : "\ue037"; visible: radar.frames.length > 1; onClicked: radar.playing = !radar.playing }
     }
     Button {
       anchors { top: parent.top; right: parent.right; margins: 8 }
@@ -110,5 +114,5 @@ Item {
       onClicked: Qt.openUrlExternally("https://www.jma.go.jp/bosai/nowc/")
     }
   }
-  Timer { interval: 1600; running: radar.playing && radar.frames.length > 1; repeat: true; onTriggered: { radar.frameIndex = (radar.frameIndex + 1) % radar.frames.length; radar.tileFailed = false; } }
+  Timer { interval: 1600; running: !radar.frozenState && radar.playing && radar.frames.length > 1; repeat: true; onTriggered: { radar.frameIndex = (radar.frameIndex + 1) % radar.frames.length; radar.tileFailed = false; } }
 }

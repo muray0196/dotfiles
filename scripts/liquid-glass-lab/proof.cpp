@@ -7,6 +7,9 @@
 #include <QOpenGLExtraFunctions>
 #include <QQuickItem>
 #include <QQuickView>
+#include <QQmlComponent>
+#include <QJSValue>
+#include <QSignalSpy>
 #include <QSGRendererInterface>
 #include <QTest>
 #include <QFile>
@@ -14,6 +17,7 @@
 #include <cmath>
 #include <iostream>
 #include <mutex>
+#include <memory>
 #include <stdexcept>
 
 namespace {
@@ -65,6 +69,13 @@ QImage capture(QQuickView& view) {
   QImage image = view.grabWindow();
   if (image.isNull()) throw std::runtime_error("GPU capture returned no pixels");
   return image;
+}
+
+QQuickItem* visualItem(QQuickItem* root, const QString& name) {
+  if (root->objectName() == name) return root;
+  for (auto* child : root->childItems())
+    if (auto* found = visualItem(child, name)) return found;
+  return nullptr;
 }
 
 void load(QQuickView& view, const QString& path, QSize size) {
@@ -187,6 +198,7 @@ int main(int argc, char** argv) {
     set("softness", 0.0);
     set("backingDistance", 100.0);
     set("transmissionRoughness", 0.008);
+    set("filterInterior", false);
     const QImage narrowChecker = capture(view);
     narrowChecker.save(output.filePath("narrow-checker.png"));
     double narrowContrast = 0;
@@ -195,6 +207,47 @@ int main(int argc, char** argv) {
         narrowContrast += difference(pixel(narrowChecker, view, x, y), pixel(narrowChecker, view, x + 1, y));
     require(narrowContrast < sharpContrast * 0.85 && narrowContrast > sharpContrast * 0.3,
             "narrow transmission softens fine detail while retaining its structure");
+    set("filterInterior", true);
+    const QImage interiorChecker = capture(view);
+    interiorChecker.save(output.filePath("interior-checker.png"));
+    double filteredMean = 0, sourceMean = 0, interiorContrast = 0;
+    int corePixels = 0;
+    for (int y = 130; y < 250; ++y) {
+      for (int x = 190; x < 365; ++x) {
+        filteredMean += pixel(interiorChecker, view, x, y).red();
+        sourceMean += pixel(checker, view, x, y).red();
+        interiorContrast += difference(pixel(interiorChecker, view, x, y),
+                                       pixel(interiorChecker, view, x + 1, y));
+        ++corePixels;
+      }
+    }
+    require(std::abs(filteredMean - sourceMean) / corePixels < 1.5,
+            "interior filtering preserves the displayed mean of bright and dark detail");
+    require(interiorContrast < narrowContrast && interiorContrast > sharpContrast * 0.1,
+            "interior filtering softens fine detail without erasing its structure");
+    // Compare rendered pixels against the retained checkpoint kernel, including
+    // refraction and light. All straight edges and curved corners are protected.
+    set("optics", 1.0);
+    set("lighting", 1.0);
+    set("filterInterior", false);
+    const QImage committedRim = capture(view);
+    set("filterInterior", true);
+    const QImage filteredRim = capture(view);
+    int rimDifference = 0;
+    for (int y = 70; y < 320; ++y) {
+      for (int x = 132; x < 432; ++x) {
+        const double qx = std::abs(x + 0.5 - 282) - 110;
+        const double qy = std::abs(y + 0.5 - 195) - 85;
+        const double distance = std::hypot(std::max(qx, 0.0), std::max(qy, 0.0))
+                                + std::min(std::max(qx, qy), 0.0) - 40;
+        if (distance >= -24 && distance <= 0)
+          rimDifference = std::max(rimDifference, difference(pixel(committedRim, view, x, y),
+                                                            pixel(filteredRim, view, x, y)));
+      }
+    }
+    require(rimDifference <= 1, "interior filtering preserves committed edge and corner pixels");
+    set("optics", 0.0);
+    set("lighting", 0.0);
     // A bright neighbor must not lift the interior of a dark region. Test the
     // bounded footprint at a deliberately long optical path as well as color.
     set("backingDistance", 500.0);
@@ -300,252 +353,6 @@ int main(int argc, char** argv) {
     require(difference(pixel(coolUnreflected, view, 280, 80), pixel(capture(view), view, 280, 80)) <= 1,
             "disabling environment reflection removes the surrounding-color response");
 
-    load(view, build.filePath("Scene.qml"), QSize(1120, 760));
-    root = view.rootObject();
-    auto pressKey = [&](Qt::Key key) {
-      // A separate desktop window can take activation during visual inspection.
-      // Route synthetic input to the scene whose behavior is under test.
-      root->forceActiveFocus(Qt::OtherFocusReason);
-      QTest::keyClick(&view, key);
-    };
-    set("animated", false);
-    set("pattern", 0);
-    set("phase", 1.7);
-    require(capture(view).save(output.filePath("color.png")), "saved color reference");
-    pressKey(Qt::Key_2);
-    require(root->property("pattern").toInt() == 1, "keyboard scene selection works");
-    require(capture(view).save(output.filePath("grid.png")), "saved grid reference");
-
-    QPoint center(20 + 718 + 92, 90 + 204 + 63);
-    QTest::mouseMove(&view, center);
-    QTest::mousePress(&view, Qt::LeftButton, Qt::NoModifier, center);
-    QTest::qWait(210);
-    auto* lens = root->findChild<QQuickItem*>("lens");
-    require(lens && lens->width() > 198, "pointer press changes lens geometry");
-    QTest::mouseMove(&view, center + QPoint(-90, 70), 40);
-    QTest::qWait(100);
-    require(std::abs(root->property("lensX").toDouble() - 628) < 2 &&
-            std::abs(root->property("lensY").toDouble() - 274) < 2,
-            "lens follows the pointer without an initial jump");
-    QTest::mouseRelease(&view, Qt::LeftButton, Qt::NoModifier, center + QPoint(-90, 70));
-    QTest::qWait(210);
-    require(std::abs(lens->width() - 184) < 0.1, "lens returns to rest after release");
-    set("pattern", 2);
-    require(capture(view).save(output.filePath("type.png")), "saved text reference");
-    set("pattern", 3);
-    require(capture(view).save(output.filePath("split.png")), "saved light and dark split reference");
-    set("dark", true);
-    require(capture(view).save(output.filePath("contrast.png")), "saved dark contrast reference");
-    set("dark", false);
-    set("phase", 0.0);
-    pressKey(Qt::Key_5);
-    auto* flower = root->findChild<QQuickItem*>("flowerImage");
-    auto* smallLens = root->findChild<QQuickItem*>("smallLens");
-    const QImage flowerGlass = capture(view);
-    require(root->property("pattern").toInt() == 4 && flower && flower->property("status").toInt() == 1,
-            "Flower scene loads the supplied image through the real background pipeline");
-    require(std::abs(lens->x() - 390) < 0.1 && std::abs(lens->y() - 185) < 0.1,
-            "switching to Flower places the lens across the petal and sky boundary");
-    require(flowerGlass.save(output.filePath("flower.png")), "saved flower lens reference");
-    require(smallLens && smallLens->isVisible() && smallLens->width() < lens->width(),
-            "Flower exposes both sizes against the same live source");
-    pressKey(Qt::Key_G);
-    QTest::qWait(180);
-    const double forming = root->property("materialAmount").toDouble();
-    require(forming > 0.02 && forming < 0.98 && lens->opacity() == 1.0,
-            "Compare animates optical strength while keeping the glass item fully opaque");
-    require(capture(view).save(output.filePath("flower-transition.png")), "saved optical transition reference");
-    QTest::qWait(700);
-    const QImage flowerBare = capture(view);
-    require(flowerBare.save(output.filePath("flower-bare.png")), "saved unmodified flower reference");
-    lens->setVisible(false);
-    smallLens->setVisible(false);
-    const QImage flowerHidden = capture(view);
-    const double imageScale = double(flowerBare.width()) / view.width();
-    const QRect stageRect = QRectF(20 * imageScale, 90 * imageScale,
-                                   1080 * imageScale, 590 * imageScale).toAlignedRect();
-    require(meanDifference(flowerBare.copy(stageRect), flowerHidden.copy(stageRect)) < 0.5,
-            "both dissolved lenses equal the source with no residual rim or shadow");
-    lens->setVisible(true);
-    smallLens->setVisible(true);
-    pressKey(Qt::Key_G);
-    QTest::qWait(750);
-    require(meanDifference(flowerGlass, capture(view)) < 0.5,
-            "materialization returns to the same optical state without feedback");
-
-    const QPointF largePosition = lens->position();
-    const QPointF smallPosition = smallLens->position();
-    const double flowerDepth = root->property("flowerDepth").toDouble();
-    const double flowerBevel = root->property("flowerBevel").toDouble();
-    const double flowerHeight = root->property("flowerHeight").toDouble();
-    set("phase", 1.5);
-    const QImage rightward = capture(view);
-    set("phase", 4.5);
-    const QImage leftward = capture(view);
-    require(lens->position() == largePosition && smallLens->position() == smallPosition &&
-            lens->property("thickness").toDouble() == flowerDepth &&
-            smallLens->property("thickness").toDouble() == flowerDepth,
-            "source motion leaves both lens positions and optical depths fixed");
-    auto regionChanged = [&](QQuickItem* item) {
-      const QRect region = QRectF((20 + item->x() + 20) * imageScale,
-                                  (90 + item->y() + 20) * imageScale,
-                                  (item->width() - 40) * imageScale,
-                                  (item->height() - 40) * imageScale).toAlignedRect();
-      return meanDifference(rightward.copy(region), leftward.copy(region)) > 12;
-    };
-    require(regionChanged(lens) && regionChanged(smallLens),
-            "both lens interiors respond visibly across the source-motion cycle");
-    set("phase", 6.0);
-    require(meanDifference(flowerGlass, capture(view)) < 0.5,
-            "the full Flower motion cycle returns without accumulated distortion");
-    set("phase", 0.0);
-
-    set("lensX", 130.0);
-    set("lensY", 270.0);
-    require(capture(view).save(output.filePath("flower-petal.png")), "saved lens crossing the petal silhouette");
-    set("lensX", 730.0);
-    set("lensY", 185.0);
-    require(capture(view).save(output.filePath("flower-sky.png")), "saved lens over a quiet sky region");
-
-    pressKey(Qt::Key_6);
-    capture(view).save(output.filePath("desert.png"));
-    pressKey(Qt::Key_G);
-    QTest::qWait(750);
-    capture(view).save(output.filePath("desert-bare.png"));
-    pressKey(Qt::Key_G);
-    QTest::qWait(750);
-
-    auto* study = root->findChild<QQuickItem*>("referenceStudy");
-    auto* referenceGlass = root->findChild<QQuickItem*>("referenceGlass");
-    auto* bar = root->findChild<QQuickItem*>("foregroundBar");
-    for (int mode = 0; mode < 3; ++mode) {
-      pressKey(static_cast<Qt::Key>(Qt::Key_7 + mode));
-      set("phase", 0.0);
-      const QImage start = capture(view);
-      const QPointF startPosition = referenceGlass->position();
-      const QString name = QStringList{"boundary", "lighting", "panel"}.at(mode);
-      if (!start.save(output.filePath(name + ".png"))) throw std::runtime_error("study capture failed");
-      require(study->isVisible() && !lens->isVisible() && !smallLens->isVisible(),
-              "reference study replaces the previous glass without hidden-state leakage");
-      if (mode == 0) {
-        const int x = int(20 + referenceGlass->x() + referenceGlass->width() / 2);
-        // The returning light band sits inside the last seven logical pixels.
-        // Stay clear of the outer two-pixel highlight and coverage boundary.
-        const int y = int(90 + referenceGlass->y() + referenceGlass->height() - 5);
-        set("bend", false);
-        const QImage unbent = capture(view);
-        require(pixel(start, view, x, y).red() > pixel(unbent, view, x, y).red() + 50
-                && pixel(start, view, x, y).red() > pixel(start, view, x, y - 15).red() + 50,
-                "boundary lens encloses the dark pocket with refracted light below it");
-        set("bend", true);
-      }
-      set("phase", 1.5);
-      const QImage moved = capture(view);
-      require(meanDifference(start, moved) > 1,
-              "the reference study produces a visible temporal change");
-      require((referenceGlass->position() == startPosition) == (mode == 1),
-              "lighting keeps geometry fixed while crossing and panel studies move the glass");
-      if (mode == 2) {
-        const QPointF point = bar->mapToScene(QPointF(bar->width() / 2, bar->height() / 2));
-        require(pixel(moved, view, int(point.x()), int(point.y())).red() > 250,
-                "the moving panel keeps its foreground bar sharp and white");
-      }
-      set("phase", 6.0);
-      require(meanDifference(start, capture(view)) < 0.5,
-              "reference motion returns to its initial image without accumulated feedback");
-    }
-
-    pressKey(Qt::Key_0);
-    set("phase", 0.0);
-    auto* sizeStudy = root->findChild<QQuickItem*>("sizeStudy");
-    auto* sizeGlass = root->findChild<QQuickItem*>("sizeGlass");
-    auto* sizeInk = root->findChild<QQuickItem*>("sizeInk");
-    const QImage compact = capture(view);
-    compact.save(output.filePath("size-compact.png"));
-    require(sizeStudy->isVisible() && !study->isVisible() && !lens->isVisible(),
-            "key zero opens the size study with no previous glass left visible");
-    const double compactDepth = sizeGlass->property("thickness").toDouble();
-    set("phase", 3.0);
-    const QImage expanded = capture(view);
-    expanded.save(output.filePath("size-expanded.png"));
-    require(sizeGlass->width() > 700 && sizeGlass->height() > 400
-            && sizeGlass->property("thickness").toDouble() > compactDepth * 2,
-            "expanding the control increases dimensions and optical depth");
-    set("phase", 1.5);
-    sizeInk->setVisible(false);
-    set("compare", true);
-    QTest::qWait(750);
-    const QImage dissolvedSize = capture(view);
-    sizeGlass->setVisible(false);
-    require(meanDifference(dissolvedSize.copy(stageRect), capture(view).copy(stageRect)) < 0.5,
-            "the intermediate size dissolves to its source without a residual colored reflection");
-    sizeGlass->setVisible(true);
-    set("compare", false);
-    QTest::qWait(750);
-    // Exercise actual default material values, not the explicit optical fixture:
-    // with bending and light isolated, Clear softens detail while retaining
-    // the broad color distribution rather than introducing a neutral veil.
-    set("bend", false);
-    set("illuminate", false);
-    const QRect clearCore = QRectF((20 + sizeGlass->x() + 70) * imageScale,
-                                   (90 + sizeGlass->y() + 70) * imageScale,
-                                   (sizeGlass->width() - 140) * imageScale,
-                                   (sizeGlass->height() - 140) * imageScale).toAlignedRect();
-    const QImage defaultCore = capture(view).copy(clearCore);
-    const QImage sourceCore = dissolvedSize.copy(clearCore);
-    const double defaultDetailChange = meanDifference(sourceCore, defaultCore);
-    require(defaultDetailChange > 0.1 && defaultDetailChange < 3.0,
-            "default Clear applies restrained local softness to transmitted detail");
-    require(meanDifference(sourceCore.scaled(24, 24, Qt::IgnoreAspectRatio, Qt::SmoothTransformation),
-                           defaultCore.scaled(24, 24, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)) < 1.0,
-            "default Clear retains the broad source colors without a diffuse body veil");
-    set("bend", true);
-    set("illuminate", true);
-    sizeInk->setVisible(true);
-    set("phase", 6.0);
-    require(meanDifference(compact, capture(view)) < 0.5,
-            "growth and shrinkage return to the same compact material without accumulated feedback");
-
-    set("pattern", 0);
-    const double beforeMotion = root->property("phase").toDouble();
-    set("animated", true);
-    QTest::qWait(300);
-    require(root->property("phase").toDouble() > beforeMotion + 0.1,
-            "live frame animation advances the background");
-    set("animated", false);
-
-    // Exercise the actual Flower settings on coordinate-coded content. This
-    // detects a regression to the shallow sand profile even if flower colors
-    // happen to conceal it in one static screenshot.
-    load(view, build.filePath("TestScene.qml"), QSize(640, 420));
-    root = view.rootObject();
-    set("glassX", 210.0);
-    set("glassY", 100.0);
-    set("glassWidth", 220.0);
-    set("glassHeight", 220.0);
-    set("glassRadius", 110.0);
-    set("bevel", flowerBevel);
-    set("surfaceHeight", flowerHeight);
-    set("backingDistance", flowerDepth);
-    const QImage unfolded = capture(view);
-    set("optics", 1.0);
-    const QImage folded = capture(view);
-    const int centerRed = pixel(unfolded, view, 320, 210).red();
-    require(pixel(folded, view, 426, 210).red() < centerRed - 5 &&
-            pixel(folded, view, 213, 210).red() > centerRed + 5,
-            "Flower rim rays reach the opposite side of the circle center");
-    require(difference(pixel(folded, view, 320, 210), pixel(unfolded, view, 320, 210)) <= 1 &&
-            pixel(folded, view, 390, 210).red() > centerRed + 10,
-            "strong rim folding retains an upright, undisplaced interior");
-    set("glassX", 244.0);
-    set("glassY", 134.0);
-    set("glassWidth", 152.0);
-    set("glassHeight", 152.0);
-    set("glassRadius", 76.0);
-    const QImage smallFold = capture(view);
-    require(pixel(smallFold, view, 392, 210).red() < pixel(folded, view, 426, 210).red() - 5,
-            "shared optical depth produces a stronger relative fold in the small circle");
-
     // The body lens must affect the former flat core without painting a veil
     // over the source or changing pixels outside the body.
     load(view, build.filePath("TestScene.qml"), QSize(640, 420));
@@ -603,10 +410,179 @@ int main(int argc, char** argv) {
               "body curvature and narrow transmission preserve uniform black, gray, and white");
     }
 
+    load(view, build.filePath("Playground.qml"), QSize(1120, 800));
+    root = view.rootObject();
+    set("showContent", false);
+    set("background", 3);
+    auto playgroundShot = [&]() {
+      const QImage frame = capture(view);
+      const double scale = double(frame.width()) / view.width();
+      return frame.copy(QRectF(20 * scale, 180 * scale, 1080 * scale, 464 * scale).toAlignedRect());
+    };
+    auto clickPlayground = [&](const QString& name) {
+      auto* button = visualItem(root, name);
+      if (!button) throw std::runtime_error("missing playground control: " + name.toStdString());
+      QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier,
+                       button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+      QTest::qWait(100);
+    };
+    const char* inherited[] = {"edgeWidth", "surfaceHeight", "thickness", "crownHeight", "magnification",
+                              "refraction", "lighting", "ambientReflection", "adaptation", "shadowStrength"};
+    QQmlComponent defaultGlass(view.engine(), QUrl::fromLocalFile(build.filePath("Glass.qml")));
+    for (int shape = 0; shape < 6; ++shape) {
+      clickPlayground(QString("shapeButton%1").arg(shape));
+      require(root->property("shape").toInt() == shape, "shape button selects its playground geometry");
+      const QImage geometryShot = capture(view);
+      geometryShot.save(output.filePath(QString("playground-shape-%1.png").arg(shape)));
+      for (int index = 0; index < (shape == 5 ? 3 : 1); ++index) {
+        auto* sample = visualItem(root, QString("playgroundGlass%1").arg(index));
+        require(sample != nullptr, "playground instantiates each requested surface");
+        QVariantMap inputs;
+        for (const char* name : {"width", "height", "radius", "backdrop", "softenedBackdrop", "backdropSize", "backdropPosition"})
+          inputs.insert(QString::fromLatin1(name), sample->property(name));
+        std::unique_ptr<QObject> defaults(defaultGlass.createWithInitialProperties(inputs));
+        require(defaults != nullptr, "shared Glass component provides the comparison defaults");
+        bool same = true;
+        for (const char* name : inherited)
+          same &= std::abs(sample->property(name).toDouble() - defaults->property(name).toDouble()) < 0.00001;
+        require(same, "shape inherits current optics without a tuned material profile");
+        const auto* shader = sample->findChild<QQuickItem*>("glassShader");
+        require(shader && QUrl::fromLocalFile(build.filePath("Glass.qml"))
+                              .resolved(shader->property("fragmentShader").toUrl()).toLocalFile() == build.filePath("glass.frag.qsb"),
+                "playground surface renders the shared glass shader");
+      }
+    }
+    set("shape", 2);
+    QTest::qWait(100);
+    auto* sample = visualItem(root, "playgroundGlass0");
+    QVariantList optics;
+    for (const char* name : inherited) optics.append(sample->property(name));
+    for (int background = 0; background < 8; ++background) {
+      clickPlayground(QString("backgroundButton%1").arg(background));
+      require(root->property("background").toInt() == background, "background button selects its source");
+      QVariantList next;
+      for (const char* name : inherited) next.append(sample->property(name));
+      require(next == optics, "background selection leaves optical parameters unchanged");
+      set("compare", true);
+      const QImage comparison = playgroundShot();
+      sample->setVisible(false);
+      require(meanDifference(comparison, playgroundShot()) < 0.5, "Compare exposes the exact unfiltered background");
+      sample->setVisible(true);
+      set("compare", false);
+    }
+    set("background", 3);
+    require(root->property("clarity").toInt() == 1 && root->property("tint").toInt() == 0,
+            "playground defaults to gently filtered Soft with tint Off");
+    const QImage clearPlayground = playgroundShot();
+    clickPlayground("clarityButton0");
+    const QImage sharpPlayground = playgroundShot();
+    require(sample->property("transmissionRoughness").toDouble() == 0
+            && meanDifference(clearPlayground, sharpPlayground) > 0.01,
+            "Clear retains full detail and Soft uses the existing narrow filter");
+    const auto* specimenForCore = sample->parentItem();
+    const QImage defaultFrame = capture(view);
+    const double imageScale = double(defaultFrame.width()) / view.width();
+    const QPointF origin = specimenForCore->mapToScene(QPointF(70, 70));
+    const QRect clearCore = QRectF(origin.x() * imageScale, origin.y() * imageScale,
+                                  (sample->width() - 140) * imageScale,
+                                  (sample->height() - 140) * imageScale).toAlignedRect();
+    sample->setProperty("refraction", 0.0);
+    sample->setProperty("lighting", 0.0);
+    const QImage defaultCore = capture(view).copy(clearCore);
+    sample->setVisible(false);
+    const QImage sourceCore = capture(view).copy(clearCore);
+    require(meanDifference(sourceCore, defaultCore) < 0.5,
+            "Clear preserves source detail without added blur or a body veil");
+    sample->setVisible(true);
+    sample->setProperty("refraction", 1.0);
+    sample->setProperty("lighting", 1.0);
+    const auto tintPresets = root->property("tintPresets").value<QJSValue>().toVariant().toList();
+    QFile paletteFile(build.filePath("tints.json"));
+    if (!paletteFile.open(QIODevice::ReadOnly)) throw std::runtime_error("missing shared tint palette");
+    const auto palette = QJsonDocument::fromJson(paletteFile.readAll()).object();
+    require(tintPresets.size() == 8 && palette.size() == 8,
+            "palette contains Off, Black, White, and five colors");
+    for (int clarity = 0; clarity < 3; ++clarity) {
+      clickPlayground(QString("clarityButton%1").arg(clarity));
+      const QImage natural = playgroundShot();
+      for (int tint = 0; tint < tintPresets.size(); ++tint) {
+        clickPlayground(QString("tintButton%1").arg(tint));
+        const auto entry = tintPresets[tint].toMap();
+        const QString name = entry["name"].toString();
+        require(sample->property("tintColor").value<QColor>() == QColor(palette[name].toString())
+                && root->property("tint").toInt() == tint && root->property("clarity").toInt() == clarity,
+                "tint button selects the shared color without changing clarity");
+        require(sample->property("transmissionRoughness").toDouble() == (clarity == 1 ? 0.008 : 0)
+                && sample->property("diffusion").toDouble() == (clarity == 2 ? 1 : 0),
+                "tint never changes or stacks the smoothing filters");
+        if (tint) require(meanDifference(natural, playgroundShot()) > 1, "each tint visibly colors every clarity");
+        set("compare", true);
+        const QImage absent = playgroundShot();
+        sample->setVisible(false);
+        require(meanDifference(absent, playgroundShot()) < 0.5,
+                "every clarity and tint combination dissolves to the exact source");
+        sample->setVisible(true);
+        set("compare", false);
+        QVariantList currentOptics;
+        for (const char* property : inherited) currentOptics.append(sample->property(property));
+        require(currentOptics == optics, "tint leaves geometry and lighting settings unchanged");
+        clickPlayground("tintButton0");
+        require(meanDifference(natural, playgroundShot()) < 0.05,
+                "Tint Off restores the same clarity without residual color");
+      }
+    }
+    clickPlayground("tintButton3");
+    clickPlayground("clarityButton1");
+    require(root->property("tint").toInt() == 3, "changing clarity preserves the chosen tint");
+    clickPlayground("tintButton0");
+    require(meanDifference(clearPlayground, playgroundShot()) < 0.05,
+            "clarity and tint round trips restore the same Soft render");
+    set("background", 6);
+    const QPoint tintCenter = sample->mapToScene(QPointF(sample->width() / 2, sample->height() / 2)).toPoint();
+    for (int tint = 0; tint < tintPresets.size(); ++tint) {
+      set("tint", tint);
+      const QColor color = sample->property("tintColor").value<QColor>();
+      const QColor actual = pixel(capture(view), view, tintCenter.x(), tintCenter.y());
+      const QColor expected = QColor::fromRgbF(1 - color.alphaF() + color.alphaF() * color.redF(),
+                                              1 - color.alphaF() + color.alphaF() * color.greenF(),
+                                              1 - color.alphaF() + color.alphaF() * color.blueF());
+      require(difference(actual, expected) <= 1,
+              "flat white reveals the exact palette hue and opacity without premultiplied-color errors");
+    }
+    set("tint", 0);
+    set("background", 3);
+    auto* specimen = sample->parentItem();
+    const QPointF initial = specimen->position();
+    const QPoint playgroundCenter = specimen->mapToScene(QPointF(specimen->width() / 2, specimen->height() / 2)).toPoint();
+    QTest::mousePress(&view, Qt::LeftButton, Qt::NoModifier, playgroundCenter);
+    QTest::mouseMove(&view, playgroundCenter + QPoint(72, 18), 100);
+    QTest::mouseRelease(&view, Qt::LeftButton, Qt::NoModifier, playgroundCenter + QPoint(72, 18));
+    require(specimen->x() > initial.x() + 50 && meanDifference(clearPlayground, playgroundShot()) > 0.1,
+            "dragging changes backdrop sampling at the actual surface position");
+    root->forceActiveFocus(Qt::OtherFocusReason);
+    QTest::keyClick(&view, Qt::Key_R);
+    require(specimen->position() == initial && meanDifference(clearPlayground, playgroundShot()) < 0.05,
+            "Recenter restores geometry and source alignment");
+    set("background", 0);
+    set("showContent", true);
+    set("shape", 5);
+    for (int clarity = 0; clarity < 3; ++clarity) {
+      set("clarity", clarity);
+      for (int tint = 0; tint < tintPresets.size(); ++tint) {
+        set("tint", tint);
+        capture(view).save(output.filePath(QString("playground-%1-%2.png").arg(clarity).arg(tintPresets[tint].toMap()["name"].toString())));
+      }
+    }
+    set("clarity", 1);
+    set("tint", 0);
+    capture(view).save(output.filePath("playground.png"));
+    QSignalSpy closeRequested(root, SIGNAL(closeRequested()));
+    clickPlayground("closeButton");
+    require(closeRequested.count() == 1, "Close requests exit from the playground host");
+
     QJsonObject result{{"checks", checks}, {"identity_mean_error_255", identityError},
                        {"blur_contrast_ratio", softContrast / sharpContrast},
                        {"narrow_contrast_ratio", narrowContrast / sharpContrast},
-                       {"default_detail_change_255", defaultDetailChange},
                        {"foreground_pixels_checked", whitePixels},
                        {"device_pixel_ratio", view.devicePixelRatio()},
                        {"graphics_api", int(view.rendererInterface()->graphicsApi())},

@@ -5,14 +5,20 @@ import "Layout.js" as Layout
 Item {
   id: panel
   required property var state
-  property bool leftSide: false
-  width: Layout.panelWidth; height: Layout.panelHeight
+  required property string kind
+  objectName: "panel-" + kind
+  readonly property var geometry: Layout.panel(kind, state.readings)
+  width: Layout.panelWidth; height: geometry.height
   readonly property bool darkText: state.darkText
   readonly property var readings: state.readings
   readonly property date clockDate: state.clockDate
   readonly property real contentWidth: width - 2 * Layout.contentInset
   property string detail: ""
   property real detailY: 0
+  property var frozenRadar: null
+  function radarState() {
+    return kind === "radar" && content.item ? content.item.snapshot() : null;
+  }
   function showDetail(text, item) {
     detail = text;
     const point = item.mapToItem(panel, 0, item.height);
@@ -21,20 +27,60 @@ Item {
       detailY = Math.max(8, point.y - item.height - detailBox.height - 6);
   }
   function hideDetail() { detail = ""; }
-  Machine { id: local; scene: panel; x: Layout.contentInset; y: Layout.contentInset; width: panel.contentWidth; visible: panel.leftSide; reading: panel.readings.local || {} }
-  Machine { id: main; scene: panel; x: Layout.contentInset; y: local.y + local.implicitHeight + 24; width: panel.contentWidth; visible: panel.leftSide; remote: true; reading: panel.readings.main || {} }
-  History { id: history; scene: panel; x: Layout.contentInset; y: main.y + main.implicitHeight + 24; width: panel.contentWidth; visible: panel.leftSide }
-  Today { id: today; scene: panel; x: Layout.contentInset; y: Layout.contentInset; width: panel.contentWidth; visible: !panel.leftSide }
-  Weather { id: weather; scene: panel; x: Layout.contentInset; y: today.y + today.implicitHeight + 24; width: panel.contentWidth; visible: !panel.leftSide }
-  Radar {
-    id: radar
-    scene: panel; x: Layout.contentInset; y: weather.y + weather.implicitHeight + 24
-    width: panel.contentWidth; visible: !panel.leftSide
-    viewportHeight: Math.max(0, panel.height - Layout.contentInset - y - headerHeight)
+  Loader {
+    id: content
+    x: Layout.contentInset; y: panel.geometry.inset
+    width: panel.contentWidth; height: panel.height - 2 * y
+    sourceComponent: panel.geometry.left ? machineContent
+      : panel.kind === "clock" ? clockContent : panel.kind === "day" ? dayContent : radarContent
   }
-  Repeater {
-    model: panel.leftSide ? [main.y - 12, history.y - 12] : [weather.y - 12, radar.y - 12]
-    Rectangle { required property real modelData; x: Layout.contentInset; y: modelData; width: panel.contentWidth; height: 1; color: panel.darkText ? "#21344857" : "#44d2e0e8" }
+  Component {
+    id: machineContent
+    Item {
+      Machine {
+        id: machine
+        scene: panel; width: parent.width
+        remote: panel.kind === "main"
+        reading: panel.readings[panel.kind] || {}
+      }
+      History {
+        id: history
+        scene: panel; width: parent.width; y: parent.height - implicitHeight
+        machineFilter: panel.kind
+      }
+      Rectangle { y: history.y - 6; width: parent.width; height: 1; color: panel.darkText ? "#21344857" : "#44d2e0e8" }
+      function audit() {
+        const result = {};
+        result[panel.kind + "Bottom"] = machine.y + machine.implicitHeight;
+        result[panel.kind + "HistoryBottom"] = history.y + history.implicitHeight;
+        return result;
+      }
+    }
+  }
+  Component {
+    id: clockContent
+    Clock {
+      scene: panel
+      function audit() { return {clockBottom: implicitHeight}; }
+    }
+  }
+  Component {
+    id: dayContent
+    Item {
+      Calendar { id: calendar; scene: panel; width: parent.width }
+      Weather { id: weather; scene: panel; width: parent.width; y: calendar.implicitHeight + Layout.daySectionGap }
+      Rectangle { y: weather.y - Layout.daySectionGap / 2; width: parent.width; height: 1; color: panel.darkText ? "#21344857" : "#44d2e0e8" }
+      function audit() { return {calendarBottom: calendar.implicitHeight, weatherBottom: weather.y + weather.implicitHeight}; }
+    }
+  }
+  Component {
+    id: radarContent
+    Radar {
+      scene: panel
+      frozenState: panel.frozenRadar
+      viewportHeight: height - headerHeight
+      function audit() { return {radarBottom: implicitHeight}; }
+    }
   }
   Rectangle {
     id: detailBox
@@ -45,7 +91,8 @@ Item {
     Text { id: detailText; x: 12; y: 12; width: parent.width - 24; text: panel.detail; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: panel.darkText ? "#172331" : "#fafbff"; font { family: "Adwaita Sans"; pixelSize: 13 } }
   }
   function audit() {
-    return panel.leftSide ? {localBottom: y + local.y + local.implicitHeight, mainBottom: y + main.y + main.implicitHeight, historyBottom: y + history.y + history.implicitHeight}
-      : {todayBottom: y + today.y + today.implicitHeight, weatherBottom: y + weather.y + weather.implicitHeight, radarBottom: y + radar.y + radar.implicitHeight};
+    const result = content.item ? content.item.audit() : {};
+    for (const key of Object.keys(result)) result[key] += y + content.y;
+    return result;
   }
 }

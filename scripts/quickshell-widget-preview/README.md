@@ -1,8 +1,8 @@
 # Quickshell widget study
 
 An isolated, working UI proposal using the accepted
-[Liquid Glass implementation](../liquid-glass-lab/README.md). **Clear is the only
-widget material appearance.** The ordinary preview never loads a plugin or changes persistent
+[Liquid Glass implementation](../liquid-glass-lab/README.md). The ordinary preview
+uses Soft; the desktop also offers Clear and Diffused, each with an independent optional tint. The ordinary preview never loads a plugin or changes persistent
 configuration. A separate, explicitly invoked desktop runner is described below.
 
 ## Review
@@ -32,7 +32,7 @@ system's Japanese fallback. No fonts or dependencies are installed.
 
 Use the buttons or **F** text, **B** backdrop, **D** direction, **E** edge
 case, **Space** motion, and **H** review controls. Buttons support Tab and
-Enter/Space. In Duet, hover abbreviated or truncated labels to read their full text beside
+Enter/Space. In Lens and instruments, hover abbreviated or truncated labels to read their full text beside
 the item, even when review controls are hidden. The older alternatives retain
 the study footer. Hover a marked calendar date for its holiday name.
 Radar supports previous/current/forecast selection, play/pause, and the original
@@ -42,7 +42,7 @@ and the JMA link remain visible. Radar controls are transparent at rest, with a
 subtle fill for selection and separate hover, press, and keyboard-focus feedback.
 Icon controls reveal their description on hover or keyboard focus.
 
-Clear defaults to fixed light text. **Light text / Dark text** switches the whole
+Soft defaults to fixed light text. **Light text / Dark text** switches the whole
 foreground explicitly; dark text is useful for a consistently bright wallpaper.
 Background selection and motion never change that choice. The choice is
 local to this preview run, with no persistent configuration changes.
@@ -69,19 +69,35 @@ Three directions are executable, not just sketches:
 
 | Direction | Composition | Assessment |
 | --- | --- | --- |
-| **Duet**, selected | Two 350 × 1024 surfaces, 12 px from the sides and 28 px from the top/bottom; 24 px internal content inset. Computer/remote/history on the left; day/environment/radar on the right. | Keeps a 1196 px central opening and gives each side a stable reading order. Few competing glass outlines. |
+| **Lens and instruments**, selected | Five 350 px surfaces: Local PC/history and Main PC/history on the left; clock, calendar/environment, and radar on the right. All right-hand edges align. | Keeps the 1196 px central opening, every existing reading while separating the clock and shortening the continuous outlines. |
 | **Islands** | Six separate surfaces; summaries and radar step inward at the bottom. | More independent modules, but the extra edges and lower inward surfaces occupy more of the desktop. |
 | **Split** | Four surfaces, including a wide lower workstation shelf with remote and history side by side. | Opens the lower-left corner but gives operational data more horizontal weight. |
 
-Duet deliberately replaces the old card arrangement. A chip/board symbol and
+The selected layout replaces the two continuous rails. `--direction lens` selects it;
+`duet` remains a command-line alias. All three right-hand surfaces have the same
+350 px width and 302 px content width. Both sides have 20 px gaps between
+surfaces and 20 px vertical content insets. Calendar and weather also have
+20 px of separation, with their divider centered in the gap. The existing Soft renderer and every type size remain
+unchanged.
+
+The clock has its own 158 px surface. Its lower blank area is trimmed by 16 px
+without moving or resizing the date, time, or seconds; that height goes to radar.
+Calendar and weather share the middle
+surface; radar uses a 200 px normal viewport or 176 px when environmental
+status needs another line. The shorter map funds the right-hand spacing while
+keeping all labels, readings, and controls. Its geographic scale stays fixed;
+the kilometre label reflects the smaller vertical coverage. Each PC surface contains its own complete history,
+so the redundant machine name inside history is removed. Its collection-window
+heading and per-machine missing-data indicator remain visible.
+
+A chip/board symbol and
 CPU/GPU label identify each device, with utilization aligned directly below the
 label. Temperature and power share the value baseline. A full-width utilization
 track and compact Memory/VRAM label-value pairs complete the group. Device models
 are small right-aligned captions on the identity line. Display connection and
 runtime state are diagnostic hover details, not permanent rows.
-Terminal and window symbols distinguish the Arch and Windows machine headings
-and repeat in their history groups. These are installed interface symbols, not
-OS logos. Components have an 8 px inset, and machine sections have 24 px separation.
+Terminal and window symbols distinguish the Arch and Windows machine headings. These are installed interface symbols, not
+OS logos. Device rows retain their 8 px inset.
 The machine columns align utilization, temperature, and power, identified by
 %, °C, and W. Units use neutral ink, with coral and lavender reserved for the
 history's Peak temp and Compute category labels. Repeated
@@ -146,32 +162,35 @@ Radar playback uses familiar play/pause symbols with descriptive accessible name
 and hover labels. CPU/GPU names, units, observation times, and data-status labels
 remain written out; an icon alone would lose useful distinctions. The symbols
 reuse the installed Material Symbols Rounded font, with no new dependency.
-The calendar and time share a surface and reading sequence.
+The clock and calendar occupy separate aligned surfaces, retaining their reading order.
 
 The clock uses 94 px regular Adwaita numerals followed by 28 px seconds, with a
 6 px gap on the same baseline. Both use tabular features; seconds have no
 preceding colon. The full timezone
 and UTC offset share the date row, in 12 px text on the same baseline as the
-15 px date. The complete time fits on one line inside the 350 px panel, without
+19 px date. The complete time fits on one line inside the 350 px panel, without
 a separate timezone row. Calendar dates use 15 px text, with 12 px weekday headings.
 Calendar rows share a 156 px area: 26 px for six weeks, 31 px for five, and 39 px
 for four. This avoids an unused row below shorter months while keeping the
-weather and radar positions stable. Today's 26 px filled circle remains centered
-in its cell, and the holiday summary follows the final row by 6 px.
-The date uses `yyyy/MM/dd (weekday)` with an English weekday. The larger clock
+weather and radar positions stable. Today uses a 15 px semibold numeral and a
+4 px neutral dot below it. The marker fits within the cell even in six-row
+months. The holiday summary follows the final row by 6 px.
+The date uses `yyyy/MM/dd (ddd)` with an abbreviated English weekday so the
+larger date and full timezone fit together. Its full weekday remains available
+on hover and in the accessible label. The larger clock
 uses space recovered from the former weather-condition footer, keeping the panel
 dimensions and six-row calendar unchanged. Sundays and public
 holidays use a fixed red text accent; Saturdays use blue. The weekday headings
 use the same colors, with public holidays taking priority over Saturday blue.
 Holiday names remain available on hover, without separate dots.
-Every date uses the same centered text layout, medium weight, and foreground
-shadow. Today's filled circle uses muted charcoal with light text, or light gray
-with the explicit dark-text palette. The neutral fill uses 60% opacity to let the
-background through while keeping the normal weekday, weekend, and holiday
-text colors. The number itself stays fully opaque.
+Every date uses the same centered text layout and foreground shadow. Ordinary
+dates retain medium weight. Today's semibold numeral and small dot replace the
+enclosing ring, keeping the normal weekday, weekend, and holiday text colors.
+The dot has a fixed contrasting edge for visibility over the glass. The number
+itself stays fully opaque, and its accessible label identifies it as today.
 These colors never follow wallpaper changes.
 The month and radar headings use 21 px text; their metadata aligns to the heading
-baselines. The right panel keeps the 94 px clock, 38 px current temperatures,
+baselines. The right-hand group keeps the 94 px clock, 38 px current temperatures,
 26 px current weather condition, and a radar viewport filling the remaining
 height as its main size hierarchy.
 The performance panel consistently uses Local PC and Main PC. System memory
@@ -192,7 +211,8 @@ CPU uses a square chip icon; GPU uses a wide graphics-card silhouette with two
 fans. These fixed-color vector icons appear beside the device labels in both
 the live rows and history, so identity does not depend on similar CPU/GPU
 lettering. They use the existing Qt SVG support and need no additional font.
-History uses two machine summaries, with 15 px headings and 22 px readings.
+History uses two machine summaries with 22 px readings. Each is now directly
+beneath its owning machine, so the repeated 15 px machine heading is unnecessary.
 Each summary has three fixed peak-temperature columns and a separate 80 px
 average-compute-power column, divided by a faint vertical rule. CPU/GPU labels
 and Avg sit directly above their values, with °C or W attached to every reading.
@@ -200,13 +220,12 @@ Peak temp and Compute category labels share a baseline and retain their warm
 and lavender accents in 12 px text. The attached °C and W units use neutral
 13 px text. Main PC has two temperature readings; its power column stays
 aligned with Local PC. There are no nested card backgrounds.
-The 243 px section uses the available space below the machines, keeping
-three-digit temperatures and four-digit power readable. Component composition
+The two 107 px history sections keep three-digit temperatures and four-digit power readable. Component composition
 remains available on power-value hover. Peak power and Hotspot remain omitted
 by request. This follows the emphasis on glanceable information and clear
 typographic hierarchy in [Apple's widget guidance](https://developer.apple.com/design/human-interface-guidelines/widgets).
-The complete left panel
-fits the 350 × 1024 surface. The utilization column reserves 88 px; temperature
+The complete left group fits the original 1024 px vertical span: a 624 px
+Local PC surface, a 20 px gap, and a 380 px Main PC surface. The utilization column reserves 88 px; temperature
 and power each have 90 px, with 3 px numeral/unit gaps. Removing the repeated
 metric symbols makes the full column width available to long readings.
 Long-value fixtures exercise GPU 1 at
@@ -217,7 +236,7 @@ mapping over the generic PCI family name. This distinguishes RX 9060 XT from
 other cards sharing its PCI device ID without hard-coding this host's hardware.
 If that database or revision is unavailable, the existing PCI-name lookup remains
 the fallback. Validate naming with `python3 -B tests/test_system_metrics.py`.
-Across both panels, section titles are 21 px,
+Across the five panels, section titles are 21 px,
 readings 13–38 px, and source/unit metadata 11–14 px. Most supporting text uses
 12 px; the radar scale uses 11 px. Small labels default to medium weight.
 Symbols retain their native strokes and the fixed soft shadow, without the
@@ -258,7 +277,7 @@ They do not currently expose sunrise or sunset. By user request, the redesign
 now omits indoor/outdoor differences, the BLE battery/RSSI row, the rain-outlook
 footer (including “no rain forecast”), and GPU hotspot history.
 
-| Existing information / meaning | Source | Place in Duet |
+| Existing information / meaning | Source | Place in Lens and instruments |
 | --- | --- | --- |
 | Local hours/minutes/seconds, date, timezone and UTC offset | System time, `date +%Z` in existing UI | Right, large clock and timezone line |
 | Month grid, weekdays, today, holiday dates/names, ISO week, day of year/year length, next holiday/countdown; missing/cached holiday data | `japanese_holidays.py` and calendar calculations | Right, calendar; accented holiday dates and hover names, metadata, holiday footer |
@@ -281,7 +300,7 @@ make that sample unavailable. History retains 300 two-second buckets, ignores
 missing samples, expires samples by time, and resets after backwards clock
 adjustments. Live preview history starts at launch; a snapshot only contains its
 observed sample, not ten minutes of fabricated history. The collector exposes
-elapsed collection time, capped at ten minutes. A single history heading shows
+elapsed collection time, capped at ten minutes. Each machine history heading shows
 “Since startup” for the first minute, then “Last minute” / “Last N minutes”,
 settling at “Last 10 minutes”. There is no separate collected-time label; hovering
 the heading reveals exact coverage. “No data” appears when no valid metrics
@@ -307,7 +326,7 @@ It intentionally does not take ownership of the installed show/hide command.
 `preview.py` copies `Glass.qml`, `BackdropSource.qml` and the required
 accepted shaders from `scripts/liquid-glass-lab`, and compiles them in a separate
 cache. `material-sha256.json` records their source hashes. Every glass property
-other than geometry, source coordinates and the fixed Clear setting uses the
+other than geometry, source coordinates and the fixed Soft setting uses the
 accepted component defaults. Flower uses the supplied translation study and
 Desert the existing shader/zoom study. No superseded renderer is imported.
 
@@ -324,8 +343,10 @@ This favors temporal stability over maximizing contrast at each instant. On an
 almost-white backdrop, light text remains too faint for comfortable reading;
 use the explicit dark-text choice. A fixed palette cannot guarantee readability
 over arbitrary video, and the severe checkerboard remains visually busy. These
-are recorded limitations, not an accessibility contrast certification. No panel
-dimming, optical retuning, or hidden automatic palette selection is introduced.
+are recorded limitations, not an accessibility contrast certification. Soft
+retains this treatment. Desktop Diffused reduces broad background detail; the independent Black tint
+supports light foreground colors with a dark backing. Dark text remains only
+an isolated-preview diagnostic; it is not a desktop appearance option.
 
 The radar viewport has no background fill: a subtle 1 px outline frames the
 accepted glass, with soft white distance rings and light labels in both
@@ -333,42 +354,46 @@ foreground palettes. JMA precipitation tiles keep their original colors and opac
 Map labels keep their fixed light palette even when the
 surrounding widget uses dark text. Compact frame/playback controls and the JMA
 link sit inside the map's upper corners. Reclaiming the separate button row makes
-the viewport taller without increasing the panel height. The shared desktop/Duet
-layout fills the remaining space down to a 24 px bottom inset: 252 px in the
-normal state, or 228 px when weather needs an extra status line. The older
+the viewport taller without increasing the panel height. The shared desktop/Lens
+layout fills the remaining space inside a separate panel with 20 px vertical insets:
+200 px in the normal state, or 176 px when weather needs an extra status line. The older
 alternatives retain 157 px. The center marker and lower distance label remain
 clear of the controls.
 The collector is invoked with `--viewport-width 344 --viewport-height 252` so
 tiles cover the complete displayed area at the existing geographic scale. This
-includes horizontal overscan beyond the narrower 302 px viewport; its distance
-label uses the actual visible width.
+includes overscan beyond the 302 × 200 px displayed viewport; its distance
+label uses the actual visible dimensions.
 These optional arguments retain the old collector's 280 × 192 defaults for
 other callers; distance rings and kilometre labels use the original scale.
 
 **Working here:** actual Quickshell window, both side compositions, all three
-directions, Clear with light/dark text, Flower/Desert and bright/dark/detail studies, animated
+directions, Soft with light/dark text, Flower/Desert and bright/dark/detail studies, animated
 metrics, long/missing cases, full-text hover, keyboard/pointer controls, existing
 collectors, and radar tiles/selection/playback.
 
 ## Desktop integration
 
-`DesktopShell.qml` and `DesktopPanel.qml` contain only the two side panels.
-`PanelContent.qml` owns the actual section layout for both production and Duet;
-`Layout.js` owns their shared panel dimensions and offsets. The two paths no
-longer duplicate the selected layout. Historical Islands/Split alternatives
-retain their separate experimental arrangements.
+`DesktopShell.qml` and `DesktopPanel.qml` contain the five independent surfaces.
+`PanelContent.qml` owns the selected section layout for production and preview;
+`Layout.js` owns their shared dimensions, offsets, and weather status allowance.
+`Clock.qml` and `Calendar.qml` preserve the existing contents as separate components;
+`Today.qml` combines them for the historical Islands/Split studies.
 There is no preview toolbar, keyboard-hint footer, demo data, or background image.
 Desktop surfaces retain `WlrKeyboardFocus.None`: controls support the pointer,
 while Tab/Enter/Space and their focus feedback are available in the ordinary
 preview window. The desktop widgets do not take keyboard focus from applications.
-Overflow and holiday hover text appears within the relevant panel. Both surfaces
+Overflow and holiday hover text appears within the relevant panel. All five surfaces
 use `liquid-glass-v1`, the top layer, and **28 logical pixels of shadow padding**
-on every side. At 1920 × 1080, the desktop bodies are 350 × 1024, inset 12 px
-from the left/right edges and 28 px from the top/bottom. Their outer rectangles
-are (-16,0,406,1080) and (1530,0,406,1080); the outermost 16 px of side shadow
-padding extends offscreen. Narrowing both panels from 400 to 350 px opens
-another 100 px in the center, for 1196 px total. The 1024 px height is retained;
-24 px content insets give the foreground 302 px of usable width.
+on every side. At 1920 × 1080, every body is 350 px wide, inset 12 px from its
+screen edge. The complete group spans y=28–1052, preserving the 1196 px center.
+The left bodies are 624 and 380 px high with a 20 px gap; their content has 20 px
+vertical insets. The right clock is 158 px high; the calendar/weather surface is
+550 px normally or 574 px with status; radar uses the remaining 276 or 252 px.
+Both right-hand gaps and vertical content insets are 20 px, matching the left.
+Every surface retains 24 px horizontal insets and all foreground type sizes.
+The radar viewport is 200 or 176 px high, making room for the larger insets
+and calendar/weather separation. Shadow padding may overlap in a
+gap; the glass bodies and foreground never overlap.
 Only the body accepts pointer input. Smaller logical outputs
 scale the content to fit; the backend's padding stays at 28 logical pixels.
 The foreground uses ordinary Qt Quick text and needs no backend extension.
@@ -414,9 +439,24 @@ edits using the actual desktop and targeted foreground captures. The receipt
 also records the complete source fingerprint of its original visual check.
 
 The desktop check loads the unchanged, already validated material backend only
-in disposable nested compositors at scales 1, 1.25, and 2. It checks two surfaces,
-live data at normal scale, show/hide, light/dark text, moving backgrounds, and zero
-pixel changes in the desktop center. Remote automation is disabled in validation.
+in disposable nested compositors at scales 1, 1.25, and 2. All three use the
+running desktop's logical size: a 1920 × 1080 desktop is captured at 1920 × 1080,
+2400 × 1350, and 3840 × 2160 pixels. Higher DPI must not shrink the widget layout.
+A fixed virtual output inside each owned compositor prevents parent window
+management from resizing the capture halfway through a test.
+The check rejects a mismatch between the running foreground files and the test
+source. It exports one private snapshot of the displayed readings, clock, and
+radar frame, retaining its radar tiles, and replays it through the same desktop
+shell at every scale. Independent collectors and freshness timers are disabled
+during replay. Each run must reproduce the reference's five panel geometries and
+snapshot exactly. Without running widgets, the check collects one reference
+snapshot on the current monitor's logical size before testing all scales.
+
+`desktop-matched.png` retains the desktop's selected clarity, tint, and foreground.
+The Flower/Desert backgrounds remain controlled material fixtures; other named
+captures deliberately exercise all 24 clarity/tint combinations. These checks
+also cover show/hide, light-text selection, moving backgrounds, and zero pixel
+changes in the desktop center. Remote automation is disabled in validation.
 Actual compositor captures and a source-bound receipt are written to
 `~/.cache/quickshell-widgets/check/`; optical source and binary fingerprints must
 also match the accepted lab's full rendering/replacement validation receipt.
@@ -430,21 +470,59 @@ python3 scripts/quickshell-widget-preview/desktop.py start
 python3 scripts/quickshell-widget-preview/desktop.py start --load-backend
 python3 scripts/quickshell-widget-preview/desktop.py toggle
 python3 scripts/quickshell-widget-preview/desktop.py status
-python3 scripts/quickshell-widget-preview/desktop.py text dark
+python3 scripts/quickshell-widget-preview/desktop.py clarity clear
+python3 scripts/quickshell-widget-preview/desktop.py clarity soft
+python3 scripts/quickshell-widget-preview/desktop.py clarity diffused
+python3 scripts/quickshell-widget-preview/desktop.py tint off
+python3 scripts/quickshell-widget-preview/desktop.py tint black
+python3 scripts/quickshell-widget-preview/desktop.py tint white
+python3 scripts/quickshell-widget-preview/desktop.py tint blue
 python3 scripts/quickshell-widget-preview/choose.py
 python3 scripts/quickshell-widget-preview/desktop.py stop
 ```
 
-`start` uses Clear/light text and preserves the original remote collector's
+The picker groups **Clarity: Clear / Soft / Diffused** and
+**Tint: Off / Black / White / Blue / Teal / Green / Amber / Rose**, marking each current selection.
+Tint defaults to Off. Choosing one attribute
+preserves the other. Escape leaves both unchanged. All combinations use stable
+light text, matching the radar labels. The playground's text-color switch is a
+preview control, separate from material tint.
+
+Clear preserves detail without added smoothing. Soft adds restrained local
+filtering and remains the default. Diffused uses broad diffusion with the narrow
+filter disabled. Clear was previously named Sharp; Soft was previously named
+Clear. The effects are unchanged, and CLI values use the new names. Black tint
+mixes in black at approximately 64% opacity; White and the five color tints use
+approximately 32%. The shared lab `tints.json` defines the palette for the playground,
+desktop shader, and picker. Tint replaces the former Natural/Dark tone setting;
+use `off` or `black` respectively. Geometry,
+refraction, highlights, data, and typography remain consistent across choices.
+The old `appearance` presets and independent `softness` toggle are removed.
+
+`clarity` or `tint` without a value reads that attribute. `status` reports both.
+Settings change immediately without a reload or saved preference. Startup uses
+`--clarity soft --tint off`; either can be selected explicitly on `start`.
+The existing picker command and shortcut continue to work. The backend must be
+updated to the validated binary before using these commands; the controller
+never automatically reloads the compositor plugin.
+
+Desktop validation covers all 24 combinations at scales 1, 1.25, and 2,
+including moving backgrounds and unchanged pixels outside the glass. Material
+checks cover brightness and detail suppression, exact round trips, stationary
+feedback, zero-presence identity, independent tint/clarity, invalid requests,
+and defaults after a backend reload. Existing render captures provide regression
+comparisons for the unchanged Clear, Soft, and Diffused appearances.
+
+`start` defaults to Soft/light text and preserves the original remote collector's
 automation flags and existing settings. Do not run it alongside the old clock
 and performance processes. It never replaces or reloads an already loaded
 backend; it checks the mapped binary before reuse. `stop` closes these widgets
-and leaves the backend loaded. The text-color picker uses the existing `wofi` dependency.
+and leaves the backend loaded. The appearance picker uses the existing `wofi` dependency.
 No command changes the login configuration or logs out/restarts Hyprland.
 
 For login cutover, replace the old clock/performance/legacy-glass startup trio
 with `desktop.py start --load-backend`, point the visibility shortcut to
-`desktop.py toggle`, and the text-color shortcut to `choose.py`. Remove the
+`desktop.py toggle`, and the appearance shortcut to `choose.py`. Remove the
 superseded glass configuration include. Back up and review the local compositor
 configuration before applying that separate step. Legacy entry points and
 private configuration are retained for rollback. The existing `widgets-toggle`
@@ -472,22 +550,33 @@ point and grabs its scene, excluding the nested compositor's startup banner.
 
 Fixed-name artifacts live in `~/.cache/quickshell-widget-preview/captures/`:
 
-- `quickshell-live-clear.png`, `quickshell-live-clear-dark-text.png`: actual Quickshell with
+- `quickshell-live-soft.png`, `quickshell-live-soft-dark-text.png`: actual Quickshell with
   collectors; `quickshell-live.json` records the observed state and scope.
-- `direction-{0,1,2}-clear.png`: all three complete compositions.
-- `clear-{flower,desert,bright,dark,detail}.png`: Clear background matrix.
-- `clear-bright-dark-text.png`: bright case with the explicit dark-text choice.
-- `clear-long-values.png`, `clear-missing-data.png`: deterministic stress cases.
+- `direction-{0,1,2}-soft.png`: all three complete compositions.
+- `soft-{flower,desert,bright,dark,detail}.png`: Soft background matrix.
+- `soft-bright-dark-text.png`: bright case with the explicit dark-text choice.
+- `soft-long-values.png`, `soft-missing-data.png`: deterministic stress cases.
   Stills wait for usage-bar transitions to settle before capture.
-- `clear-motion.mp4`: six seconds, 1920 × 1080, 20 fps; Flower then Desert with
+- `soft-motion.mp4`: six seconds, 1920 × 1080, 20 fps; Flower then Desert with
   changing metric values. Fixed-time rendering is not a real-time benchmark.
 - `results.json`: dimensions, layout bounds, keyboard, pointer, overflow and
   animation checks. Also compares actual foreground-only RGBA renders with data
   held constant over five backgrounds and four motion phases for each of two
-  palettes: Clear light and Clear dark. All 40 renders must remain
+  palettes: Soft light and Soft dark. All 40 renders must remain
   pixel-identical to their palette's reference. `material-sha256.json` is one
   level above the captures.
 
 The directory is bounded by those fixed names and overwritten on rerun. Private
 collector snapshots stay outside the repository. No install, unstow, package
 change, or real-home deployment is part of validation.
+
+### Lens and instruments validation
+
+The native foreground field inventory was compared with the previous two-panel
+layout for normal, long-value, and missing-data fixtures. All existing readings,
+units, metadata, and accessible descriptions remain. The only removed entries
+are the repeated Local PC/Main PC labels within history; each history now belongs
+to its machine surface and has its own collection-window heading. Rendered glyph
+bounds fit every owning panel in all three fixtures. The unchanged material also
+passed desktop integration at scales 1, 1.25, and 2, including show/hide, stable
+foreground palettes, moving backgrounds, and a clear desktop center.

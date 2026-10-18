@@ -5,10 +5,11 @@ import "Format.js" as F
 Item {
   id: history
   required property var scene
+  property string machineFilter: "all"
   readonly property var values: scene.readings.history || {}
-  readonly property bool hasReadings: ["local_cpu", "local_gpu1", "local_gpu2", "main_cpu", "main_gpu", "local_average", "main_average"].some(key => typeof values[key] === "number" && isFinite(values[key]))
+  readonly property bool hasReadings: ["local_cpu", "local_gpu1", "local_gpu2", "main_cpu", "main_gpu", "local_average", "main_average"].some(key => (machineFilter === "all" || key.startsWith(machineFilter + "_")) && typeof values[key] === "number" && isFinite(values[key]))
   readonly property real windowSeconds: typeof values.window_seconds === "number" ? values.window_seconds : 0
-  implicitHeight: 243
+  implicitHeight: machineFilter === "all" ? 243 : 107
   Label {
     id: historyTitle
     scene: history.scene; size: 21; weight: Font.DemiBold
@@ -53,38 +54,40 @@ Item {
   }
   Repeater {
     model: [
-      {name: "Local PC", remote: false,
+      {name: "Local PC", key: "local", remote: false,
        temperatures: [{name: "CPU", value: history.values.local_cpu}, {name: "GPU 1", value: history.values.local_gpu1}, {name: "GPU 2", value: history.values.local_gpu2}],
        average: history.values.local_average, parts: "CPU + GPU 1 + GPU 2"},
-      {name: "Main PC", remote: true,
+      {name: "Main PC", key: "main", remote: true,
        temperatures: [{name: "CPU", value: history.values.main_cpu}, {name: "GPU", value: history.values.main_gpu}],
        average: history.values.main_average, parts: "CPU + GPU"}
-    ]
+    ].filter(group => history.machineFilter === "all" || group.key === history.machineFilter)
     Item {
       id: group
       required property var modelData
       required property int index
       readonly property real powerX: width - 80
       readonly property real temperatureWidth: powerX - 14
-      y: 38 + index * 104; width: history.width; height: 98
-      Label { scene: history.scene; text: F.machineSymbol(group.modelData.remote); family: "Material Symbols Rounded"; size: 18; width: 18; y: groupTitle.y + groupTitle.capCenterY - inkCenterY; accessibleText: group.modelData.name }
-      Label { id: groupTitle; scene: history.scene; x: 24; text: group.modelData.name; size: 15; weight: Font.DemiBold }
-      Label { scene: history.scene; y: 24; text: "Peak temp"; size: 12; ink: F.temperatureInk(history.scene.darkText) }
-      Rectangle { x: group.temperatureWidth + 6; y: 24; width: 1; height: 70; color: history.scene.darkText ? "#21344857" : "#33d2e0e8" }
-      Label { scene: history.scene; x: group.powerX; y: 24; text: "Compute"; size: 12; ink: F.powerInk(history.scene.darkText) }
+      readonly property real headingHeight: history.machineFilter === "all" ? 24 : 0
+      y: history.machineFilter === "all" ? 38 + index * 104 : 36
+      width: history.width; height: headingHeight + 71
+      Label { scene: history.scene; visible: group.headingHeight > 0; text: F.machineSymbol(group.modelData.remote); family: "Material Symbols Rounded"; size: 18; width: 18; y: groupTitle.y + groupTitle.capCenterY - inkCenterY; accessibleText: group.modelData.name }
+      Label { id: groupTitle; scene: history.scene; visible: group.headingHeight > 0; x: 24; text: group.modelData.name; size: 15; weight: Font.DemiBold }
+      Label { scene: history.scene; y: group.headingHeight; text: "Peak temp"; size: 12; ink: F.temperatureInk(history.scene.darkText) }
+      Rectangle { x: group.temperatureWidth + 6; y: group.headingHeight; width: 1; height: 70; color: history.scene.darkText ? "#21344857" : "#33d2e0e8" }
+      Label { scene: history.scene; x: group.powerX; y: group.headingHeight; text: "Compute"; size: 12; ink: F.powerInk(history.scene.darkText) }
       Repeater {
         model: group.modelData.temperatures
         Readout {
           required property var modelData
           required property int index
-          x: index * width; y: 46; width: group.temperatureWidth / 3
+          x: index * width; y: group.headingHeight + 22; width: group.temperatureWidth / 3
           name: modelData.name; value: modelData.value; unit: "°C"
           device: true
           description: group.modelData.name + " " + name + " peak temperature: " + F.number(value) + " °C"
         }
       }
       Readout {
-        x: group.powerX; y: 46; width: group.width - x
+        x: group.powerX; y: group.headingHeight + 22; width: group.width - x
         name: "Avg"; value: group.modelData.average; unit: "W"
         description: group.modelData.name + " average compute power: " + F.number(value) + " W (" + group.modelData.parts + ")"
       }

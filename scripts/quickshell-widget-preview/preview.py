@@ -20,7 +20,7 @@ CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "quicks
 
 
 @contextmanager
-def isolated_display(env, cache=None, scale=1):
+def isolated_display(env, cache=None, scale=1, logical_size=None):
     """No plugin operations. Select only the compositor PID launched here."""
     if not env.get("WAYLAND_DISPLAY"):
         raise RuntimeError("Run capture from your graphical session (WAYLAND_DISPLAY is required).")
@@ -62,6 +62,31 @@ hl.window_rule({name = "optical-proof-size", match = {class = "liquid-glass-lab-
                 time.sleep(0.1)
             else:
                 raise RuntimeError(f"Nested preview did not start; see {cache / 'nested.log'}")
+            if logical_size:
+                # Parent window management can resize a Wayland output at any
+                # time. A virtual output in this owned compositor stays fixed.
+                ctl = ["hyprctl", "-i", instance["instance"]]
+                width, height = (round(value * scale) for value in logical_size)
+                checked([*ctl, "output", "create", "headless", "widget-validation"])
+                # Plugin load/unload reloads the compositor configuration, so
+                # these rules must survive beyond a transient `hyprctl eval`.
+                with config.open("a") as rules:
+                    # Headless outputs composite a software cursor into captures.
+                    rules.write('hl.config({cursor = {invisible = true}})\n')
+                    rules.write('hl.monitor({output = "widget-validation", '
+                                f'mode = "{width}x{height}@60", position = "0x0", scale = {scale}}})\n')
+                    for monitor in monitors:
+                        rules.write('hl.monitor({output = ' + json.dumps(monitor["name"]) + ', disabled = true})\n')
+                checked([*ctl, "reload"])
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    active = json.loads(checked([*ctl, "-j", "monitors"]))
+                    if len(active) == 1 and (active[0]["name"], active[0]["width"], active[0]["height"], active[0]["scale"]) == (
+                            "widget-validation", width, height, scale):
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise RuntimeError("Could not establish the fixed desktop validation output")
             child.update(WAYLAND_DISPLAY=instance["wl_socket"], HYPRLAND_INSTANCE_SIGNATURE=instance["instance"],
                          QT_QPA_PLATFORM="wayland", QSG_RHI_BACKEND="opengl")
             yield child
@@ -141,7 +166,7 @@ def check_quickshell(env, live):
                 if state["darkText"] != dark:
                     raise RuntimeError("Quickshell foreground selection failed")
                 time.sleep(1)
-                name = "quickshell-" + ("live-" if live else "") + "clear" + ("-dark-text" if dark else "") + ".png"
+                name = "quickshell-" + ("live-" if live else "") + "soft" + ("-dark-text" if dark else "") + ".png"
                 target = captures / name
                 target.unlink(missing_ok=True)
                 checked(["qs", "ipc", "--pid", str(process.pid), "call", "preview", "capture", str(target)], env=display)
@@ -171,14 +196,14 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("build", help="copy the accepted material unchanged and compile its shaders")
     run = sub.add_parser("run", help="open a separate ordinary Quickshell window")
-    run.add_argument("--text", choices=("light", "dark"), default="light", help="stable Clear foreground; choose dark for bright wallpaper")
-    run.add_argument("--direction", choices=("duet", "islands", "split"), default="duet")
+    run.add_argument("--text", choices=("light", "dark"), default="light", help="stable Soft foreground; choose dark for bright wallpaper")
+    run.add_argument("--direction", choices=("lens", "duet", "islands", "split"), default="lens", help="lens is the selected layout; duet remains an alias")
     run.add_argument("--background", choices=("flower", "desert", "bright", "dark", "detail"), default="flower")
     run.add_argument("--live", action="store_true", help="read existing collectors; no remote desktop automation")
     sub.add_parser("stop", help="close only this study's Quickshell instance")
     check = sub.add_parser("check", help="verify the actual Quickshell window in a disposable nested compositor")
     check.add_argument("--live", action="store_true", help="also verify read-only live collectors")
-    capture = sub.add_parser("capture", help="render directions, Clear stress cases, and motion clips")
+    capture = sub.add_parser("capture", help="render directions, Soft stress cases, and motion clips")
     capture.add_argument("--snapshot", type=Path, help="optional real collector snapshot (private, local file)")
     capture.add_argument("--stills-only", action="store_true", help="omit the six-second moving-background recording")
     args = parser.parse_args()
@@ -198,7 +223,7 @@ def main():
         if args.command == "run":
             env.update(WIDGET_PREVIEW_SOURCE=str(SOURCE),
                        WIDGET_PREVIEW_TEXT=args.text,
-                       WIDGET_PREVIEW_DIRECTION=str(("duet", "islands", "split").index(args.direction)),
+                       WIDGET_PREVIEW_DIRECTION=str({"lens": 0, "duet": 0, "islands": 1, "split": 2}[args.direction]),
                        WIDGET_PREVIEW_BACKGROUND=str(("flower", "desert", "bright", "dark", "detail").index(args.background)),
                        WIDGET_PREVIEW_LIVE="1" if args.live else "0")
             return subprocess.call(["qs", "--no-duplicate", "--path", str(CACHE / "shell.qml")], env=env)

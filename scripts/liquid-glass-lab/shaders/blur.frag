@@ -19,14 +19,38 @@ vec3 displayColor(vec3 c) {
 }
 
 void main() {
+#ifdef GLASS_ADJACENT_TAPS
+  // Only for a linear input with one-texel spacing. Bilinear interpolation
+  // combines each adjacent pair without dropping any of the Gaussian weights.
+  vec3 color = texture(source, qt_TexCoord0).rgb;
+  float total = 1.0;
+  for (int i = 1; i < 10; i += 2) {
+    float a = exp(-0.5 * float(i * i) / (sigma * sigma));
+    float b = exp(-0.5 * float((i + 1) * (i + 1)) / (sigma * sigma));
+    float weight = a + b;
+    vec2 offset = (float(i) + b / weight) * stepUV;
+    color += (texture(source, qt_TexCoord0 + offset).rgb
+              + texture(source, qt_TexCoord0 - offset).rgb) * weight;
+    total += 2.0 * weight;
+  }
+#else
   vec3 color = vec3(0.0);
   float total = 0.0;
   // Contiguous samples at half resolution avoid the repeated-line artifacts
   // of a sparse kernel with widely separated taps.
   for (int i = -10; i <= 10; ++i) {
     float weight = exp(-0.5 * float(i * i) / (sigma * sigma));
-    color += linearColor(texture(source, qt_TexCoord0 + float(i) * stepUV).rgb) * weight;
+    vec3 sampleColor = texture(source, qt_TexCoord0 + float(i) * stepUV).rgb;
+#ifndef GLASS_LINEAR_INPUT
+    sampleColor = linearColor(sampleColor);
+#endif
+    color += sampleColor * weight;
     total += weight;
   }
-  fragColor = vec4(displayColor(color / total), 1.0) * qt_Opacity;
+#endif
+  color /= total;
+#ifndef GLASS_LINEAR_OUTPUT
+  color = displayColor(color);
+#endif
+  fragColor = vec4(color, 1.0) * qt_Opacity;
 }

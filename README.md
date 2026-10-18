@@ -3,25 +3,47 @@
 Linux dotfiles shared across Ubuntu, Arch Linux, and WSL.
 Choose a profile to build anything from a minimal shell setup to a full development environment.
 
-The independent [Liquid Glass optical prototype](scripts/liquid-glass-lab/README.md)
+The [Liquid Glass playground](scripts/liquid-glass-lab/README.md)
 can be launched with `python3 scripts/liquid-glass-lab/lab.py run`. It opens a
-separate Quickshell test scene and does not change installed desktop widgets.
-It uses the Clear material throughout, with controls for its individual optical effects.
+separate Quickshell window and does not change installed desktop widgets.
+Try different shapes and backgrounds with the current shared glass shader and
+the desktop's Clear, Soft, and Diffused clarity settings plus optional color tint. Shapes change
+geometry only; the playground has no background-specific optical tuning.
 The same project includes an experimental GPU desktop backend. Use
 `python3 scripts/liquid-glass-lab/lab.py desktop-check` to test it in isolated
 compositors and `desktop-record` to export a preview. See its README before
 using the optional `desktop` command in a normal session.
+Use `python3 scripts/liquid-glass-lab/lab.py benchmark --device <render-node>`
+for offscreen Clear filtering comparisons and GPU timings without loading a live plugin.
+Desktop Clear uses up to 4× hardware anisotropic filtering on the source texture.
+Clear and Soft limit their lighting blur to widget footprints and skip unused lighting
+mipmaps, preserving the source filtering, image resolution, and refresh rate.
+Diffused uses a linear half-float blur intermediate on supported GPUs, improving
+precision and reducing color-conversion work while retaining the blur kernel.
 
 The separate [widget UI study](scripts/quickshell-widget-preview/README.md)
 redesigns the left/right composition using that accepted material. Run
 `python3 scripts/quickshell-widget-preview/preview.py run` for an isolated window;
-its Clear-only directions and screenshots are documented with the preview.
+its Soft-only directions and screenshots are documented with the preview.
 The selected preview and desktop share their panel layout and positioning.
 `python3 scripts/quickshell-widget-preview/desktop.py check` validates the actual
-two-panel desktop integration in disposable compositors. The separate desktop
+five-surface desktop integration in disposable compositors. It replays the running
+desktop's data, clock, radar frame, and logical layout at 1×, 1.25×, and 2× DPI,
+and rejects mismatched foreground files or panel geometry. The separate desktop
 launcher requires current integration validation and explicit opt-in to load
 the backend. Foreground-only edits reuse that validation; each start checks QML
 syntax before launching the widgets.
+Its selected Lens and instruments layout uses five separate glass surfaces,
+retains the existing information, and aligns all three right-hand panels at
+350 px width.
+The desktop picker separates **Clarity: Clear / Soft / Diffused** from
+**Tint: Off / Black / White / Blue / Teal / Green / Amber / Rose**; all use light text.
+Tint defaults to Off. Clear preserves background detail,
+Soft adds gentle local smoothing, and Diffused uses broad smoothing without
+stacking the narrow filter.
+Use `python3 scripts/quickshell-widget-preview/desktop.py clarity diffused` and
+`desktop.py tint black` to change these independently. Startup defaults to
+Soft with tint Off; `start --clarity clear --tint blue` selects another combination.
 
 ## Supported environments
 

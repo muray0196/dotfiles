@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import "Format.js" as F
+import "Layout.js" as Layout
 
 Item {
   id: weather
@@ -10,7 +11,7 @@ Item {
   readonly property bool indoorCurrent: ["Live", "Demo", "Snapshot"].includes(indoor._status)
   readonly property bool indoorStatusVisible: indoor._status !== "Live"
   readonly property bool outdoorStatusVisible: outdoor._status !== "Live" || !outdoor.observed_at
-  readonly property int forecastY: indoorStatusVisible || outdoorStatusVisible ? 166 : 142
+  readonly property int forecastY: Layout.weatherHeight(scene.readings) - 110
   readonly property bool darkInk: scene.darkText
   readonly property string conditionSymbol: F.symbol(outdoor.state)
   implicitHeight: forecastY + 110
