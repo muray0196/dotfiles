@@ -565,5 +565,9 @@ and [Quickshell ScreencopyView](https://quickshell.org/docs/v0.3.0/types/Quicksh
 
 Build products and a fixed set of evidence files are overwritten in
 `$XDG_CACHE_HOME/dotfiles-liquid-glass-lab` (default
-`~/.cache/dotfiles-liquid-glass-lab`). No generated files belong in Git. After
-stopping the prototype, this dedicated cache directory can be removed.
+`~/.cache/dotfiles-liquid-glass-lab`). No generated files belong in Git. The
+desktop widget runner also uses `desktop/liquid-glass.so` and its validation
+receipt here to authorize startup. Preserve that accepted build and receipt
+while the desktop widgets are deployed, even when the playground is closed.
+Old trial captures can be removed independently of the current build and proof
+results; inspect mapped libraries before removing any native build.

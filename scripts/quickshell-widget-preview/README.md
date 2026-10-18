@@ -270,8 +270,7 @@ exercise extremes and interactions without replacing that visual check.
 
 ## Current information inventory and mapping
 
-Inspected entry points: `modules/quickshell/.config/quickshell/clock/shell.qml`
-and `modules/quickshell/.config/quickshell/performance/shell.qml`, plus their
+The field inventory is retained from the retired desktop shells and their
 Python collectors. The current files, rather than older UI notes, define scope.
 They do not currently expose sunrise or sunset. By user request, the redesign
 now omits indoor/outdoor differences, the BLE battery/RSSI row, the rain-outlook
@@ -520,16 +519,21 @@ backend; it checks the mapped binary before reuse. `stop` closes these widgets
 and leaves the backend loaded. The appearance picker uses the existing `wofi` dependency.
 No command changes the login configuration or logs out/restarts Hyprland.
 
-For login cutover, replace the old clock/performance/legacy-glass startup trio
-with `desktop.py start --load-backend`, point the visibility shortcut to
-`desktop.py toggle`, and the appearance shortcut to `choose.py`. Remove the
-superseded glass configuration include. Back up and review the local compositor
-configuration before applying that separate step. Legacy entry points and
-private configuration are retained for rollback. The existing `widgets-toggle`
-helper routes to the new owner when its session is recorded and retains the old
-clock/performance IPC fallback otherwise. Local cutover records and the original
-configuration backup path are stored in `~/.cache/quickshell-widgets/cutover-applied.json`;
-the machine-specific configuration itself is not committed to this repository.
+For optional login startup, invoke `desktop.py start --load-backend`, point the
+visibility shortcut to `widgets-toggle` or `desktop.py toggle`, and the
+appearance shortcut to `choose.py`. `widgets-toggle` uses this runner directly
+and requires its recorded running session. The retired widget shells and glass
+launcher are no longer shipped. Shared collectors and private configuration
+remain in the `quickshell` module. Back up and review the local compositor
+configuration before changing login startup; it is not committed to this
+repository or configured by standard profiles.
+
+Keep `~/.cache/quickshell-widgets/app`, the loaded library under `backend`,
+`session.json`, and `check` while these widgets are deployed. The accepted native
+build and its validation receipt under `~/.cache/dotfiles-liquid-glass-lab/desktop`
+are also required by the startup checks. Radar and holiday caches belong to the
+running collectors. Old trial captures and unused library versions can be
+removed separately after checking process mappings and retained receipts.
 
 ## Evidence and validation
 
