@@ -22,6 +22,9 @@ from machine_config import (
     load_machine_config,
 )
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common"))
+from collector_lifetime import stop_on_stdout_close  # noqa: E402
+
 
 DEFAULT_CONFIG = Path.home() / ".config/quickshell/performance/remote.json"
 MEBIBYTE = 1024 * 1024
@@ -307,6 +310,8 @@ def stream(
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, stop)
+    if not once:
+        stop_on_stdout_close()
 
     while not finished:
         started = time.monotonic()

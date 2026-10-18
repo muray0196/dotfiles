@@ -14,6 +14,9 @@ from typing import Any
 
 from clock_config import DEFAULT_CONFIG, load_clock_config
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common"))
+from collector_lifetime import stop_on_stdout_close  # noqa: E402
+
 
 SERVICE_UUID = "0000fd3d-0000-1000-8000-00805f9b34fb"
 SWITCHBOT_COMPANY_ID = 0x0969
@@ -101,6 +104,7 @@ async def scan(address: str | None, once: bool, timeout: float) -> int:
     if not once:
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, stop)
+        stop_on_stdout_close()
 
     if once:
         try:

@@ -281,6 +281,11 @@ background update. Reapplying a style refreshes that cache. The optics patch
 also invalidates remaining glass layers when a layer closes; continuous forced
 rendering stays off. Plugin installation and startup remain explicitly opt-in.
 
+Continuous SwitchBot and remote-metrics collectors stop when their widget closes
+the output pipe, including after an abrupt runtime exit and while no readings
+are available. Repeated widget launches therefore do not leave these collectors
+running without a consumer.
+
 Real credentials, location data, BLE identifiers, display hardware settings,
 and mutable automation state are local files and are never tracked. Create only
 the files needed for this machine from the adjacent `*.example.json` templates:
